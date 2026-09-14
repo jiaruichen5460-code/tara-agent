@@ -29,4 +29,6 @@ class HealthResponse(BaseModel):
     version: str
     environment: str
     data_ready: bool
+    agent_ready: bool
+    model: str
     datasets: list[DatasetStatus]

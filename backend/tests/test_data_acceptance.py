@@ -5,6 +5,16 @@ from pathlib import Path
 
 import pytest
 
+from tara_agent.analysis import (
+    DiversityQuery,
+    EnvironmentAssociationQuery,
+    EnvironmentVariable,
+    FindSamplesQuery,
+    FindTaxaQuery,
+    TaraQueryService,
+    TaraScientificService,
+    TaxonAbundanceQuery,
+)
 from tara_agent.data.catalog import DATASET_SPECS
 from tara_agent.data.preprocess import preprocess
 from tara_agent.data.store import ProcessedDataStore
@@ -59,3 +69,89 @@ def test_full_dataset_preprocessing_acceptance(tmp_path: Path) -> None:
     assert store.load_sample_context().height == 1_434
     assert len(store.marker_sample_ids(Marker.V4)) == 1_011
     assert len(store.marker_sample_ids(Marker.V9)) == 1_069
+
+    service = TaraQueryService(store)
+    samples = service.find_samples(
+        FindSamplesQuery(
+            ocean_region_contains="Mediterranean",
+            polar=False,
+            depths=["SRF"],
+            temperature_min=20,
+            limit=20,
+        )
+    )
+    assert samples.page.total > 0
+    assert all(item.depth == "SRF" for item in samples.items)
+    assert all(item.temperature is not None and item.temperature >= 20 for item in samples.items)
+
+    sample = service.get_sample_info("TARA_A100000005")
+    assert sample.sample.ocean_region.startswith("[MS] Mediterranean Sea")
+
+    taxa = service.find_taxa(
+        FindTaxaQuery(
+            marker=Marker.V4,
+            taxon="Bacillariophyta",
+            asv_limit=5,
+            sample_limit=5,
+        )
+    )
+    assert taxa.asv_page.total == 5_173
+    assert taxa.sample_page.total > 0
+    assert all("Bacillariophyta" in item.taxonomy.split(";") for item in taxa.asvs)
+
+    scientific = TaraScientificService(store)
+    marker_samples = store.marker_sample_ids(Marker.V4)[:100]
+    abundance = scientific.taxon_abundance(
+        TaxonAbundanceQuery(
+            marker=Marker.V4,
+            taxon="Bacillariophyta",
+            sample_ids=marker_samples,
+            limit=5,
+        )
+    )
+    assert abundance.matching_asv_count == 5_173
+    assert all(
+        item.relative_abundance is None or 0 <= item.relative_abundance <= 1
+        for item in abundance.observations
+    )
+
+    diversity = scientific.diversity_analysis(
+        DiversityQuery(
+            marker=Marker.V4,
+            taxon="Bacillariophyta",
+            sample_ids=marker_samples[:5],
+            limit=5,
+        )
+    )
+    assert all(item.observed_asv_richness > 0 for item in diversity.observations)
+    assert all(item.shannon_index is not None for item in diversity.observations)
+
+    association = scientific.environment_association(
+        EnvironmentAssociationQuery(
+            marker=Marker.V4,
+            taxon="Bacillariophyta",
+            sample_ids=marker_samples,
+            environment_variable=EnvironmentVariable.TEMPERATURE,
+            point_limit=5,
+        )
+    )
+    assert association.sample_count >= 3
+    assert association.rho is not None
+    assert association.p_value is not None
+    assert "asymptotic_p_value_caution" in {
+        warning.code for warning in association.metadata.warnings
+    }
+
+    all_zero = scientific.environment_association(
+        EnvironmentAssociationQuery(
+            marker=Marker.V4,
+            taxon="NotATaxon",
+            sample_ids=marker_samples[:3],
+            environment_variable=EnvironmentVariable.TEMPERATURE,
+        )
+    )
+    assert all_zero.rho is None
+    assert all_zero.p_value is None
+    assert {"taxon_not_found", "constant_input"} <= {
+        warning.code for warning in all_zero.metadata.warnings
+    }

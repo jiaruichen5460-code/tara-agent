@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PACKAGE_FILE = Path(__file__).resolve()
@@ -20,6 +20,7 @@ class Settings(BaseSettings):
         env_file=BACKEND_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     app_name: str = "Tara-Agent API"
@@ -28,6 +29,14 @@ class Settings(BaseSettings):
     dataset_dir: Path = PROJECT_ROOT / "Tara_4_Core_Datasets"
     processed_data_dir: Path = BACKEND_ROOT / "data" / "processed"
     cors_origins: list[str] = ["http://localhost:3000"]
+    deepseek_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("DEEPSEEK_API_KEY", "TARA_DEEPSEEK_API_KEY"),
+    )
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-flash"
+    deepseek_reasoning_effort: Literal["low", "high", "max"] = "low"
+    deepseek_timeout_seconds: float = Field(default=60, gt=0, le=300)
 
     @field_validator("dataset_dir", "processed_data_dir", mode="before")
     @classmethod

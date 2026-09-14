@@ -47,3 +47,5 @@ Thumbs.db
 
 # Project documentation is kept local by request
 *.md
+!backend/README.md
+!frontend/README.md

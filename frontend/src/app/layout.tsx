@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Tara-Agent",
-  description: "Natural-language exploration of Tara Oceans core datasets",
+  title: "Tara-Agent | Oceans analysis",
+  description: "Traceable natural-language analysis of Tara Oceans core datasets",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
@@ -15,4 +15,3 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     </html>
   );
 }
-

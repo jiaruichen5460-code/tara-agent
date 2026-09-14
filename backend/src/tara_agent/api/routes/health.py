@@ -42,6 +42,8 @@ def _health_response(request: Request) -> HealthResponse:
         version=__version__,
         environment=settings.environment,
         data_ready=data_ready,
+        agent_ready=request.app.state.agent is not None,
+        model=settings.deepseek_model,
         datasets=datasets,
     )
 

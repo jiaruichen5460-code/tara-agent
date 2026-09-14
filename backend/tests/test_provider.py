@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from tara_agent.agent.models import ToolDefinition, ToolName, ToolPlan
+from tara_agent.agent.provider import AgentModelError, DeepSeekChatModel
+from tara_agent.config import Settings
+
+
+class FakeCompletions:
+    def __init__(self, tool_calls: list[Any]) -> None:
+        self.tool_calls = tool_calls
+        self.request: dict[str, Any] = {}
+
+    async def create(self, **kwargs: Any) -> Any:
+        self.request = kwargs
+        message = SimpleNamespace(tool_calls=self.tool_calls)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+class FakeStreamingCompletions:
+    def __init__(self, deltas: list[tuple[str | None, str | None]]) -> None:
+        self.deltas = deltas
+        self.request: dict[str, Any] = {}
+
+    async def create(self, **kwargs: Any) -> Any:
+        self.request = kwargs
+
+        async def chunks():
+            for reasoning, content in self.deltas:
+                delta = SimpleNamespace(content=content, reasoning_content=reasoning)
+                yield SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+        return chunks()
+
+
+def tool_call(name: str, arguments: str) -> Any:
+    function = SimpleNamespace(name=name, arguments=arguments)
+    return SimpleNamespace(function=function)
+
+
+def model_with(completions: FakeCompletions) -> DeepSeekChatModel:
+    model = DeepSeekChatModel(Settings(deepseek_api_key="test-key"))
+    model.client = SimpleNamespace(
+        chat=SimpleNamespace(completions=completions),
+    )
+    return model
+
+
+def streaming_model_with(completions: FakeStreamingCompletions) -> DeepSeekChatModel:
+    model = DeepSeekChatModel(Settings(deepseek_api_key="test-key"))
+    model.client = SimpleNamespace(
+        chat=SimpleNamespace(completions=completions),
+    )
+    return model
+
+
+@pytest.mark.anyio
+async def test_planner_uses_required_function_call_with_mcp_schema() -> None:
+    completions = FakeCompletions(
+        [tool_call("find_samples", '{"query":{"limit":1}}')]
+    )
+    model = model_with(completions)
+    tools = [
+        ToolDefinition(
+            name=ToolName.FIND_SAMPLES,
+            description="Find bounded Tara samples.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "object",
+                        "default": {},
+                        "examples": [{"limit": 20}],
+                    }
+                },
+                "required": ["query"],
+            },
+        )
+    ]
+
+    plan = await model.plan("找一个 Tara 样本", tools)
+
+    assert plan.tool_name is ToolName.FIND_SAMPLES
+    assert plan.arguments == {"query": {"limit": 1}}
+    assert completions.request["tool_choice"] == "required"
+    assert completions.request["extra_body"] == {"thinking": {"type": "disabled"}}
+    function = completions.request["tools"][0]["function"]
+    assert function["name"] == "find_samples"
+    assert function["parameters"] == {
+        "type": "object",
+        "properties": {"query": {"type": "object"}},
+        "required": ["query"],
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "calls",
+    [
+        [],
+        [tool_call("find_samples", "not-json")],
+        [tool_call("run_sql", '{"sql":"select 1"}')],
+    ],
+)
+async def test_planner_rejects_unusable_function_calls(calls: list[Any]) -> None:
+    model = model_with(FakeCompletions(calls))
+
+    with pytest.raises(AgentModelError):
+        await model.plan("test", [])
+
+
+@pytest.mark.anyio
+async def test_answer_streams_reasoning_and_content_as_separate_deltas() -> None:
+    completions = FakeStreamingCompletions(
+        [("先检查数据。", None), (None, "结论"), (None, "：可靠。")]
+    )
+    model = streaming_model_with(completions)
+    plan = ToolPlan(
+        tool_name="find_samples",
+        arguments={"query": {"limit": 1}},
+        rationale="查找样本。",
+    )
+
+    chunks = [
+        chunk
+        async for chunk in model.stream_answer(
+            "找一个样本",
+            plan,
+            {"items": []},
+        )
+    ]
+
+    assert [(chunk.kind, chunk.content) for chunk in chunks] == [
+        ("reasoning", "先检查数据。"),
+        ("answer", "结论"),
+        ("answer", "：可靠。"),
+    ]
+    assert completions.request["stream"] is True
+    assert completions.request["reasoning_effort"] == "low"
+
+
+@pytest.mark.anyio
+async def test_answer_rejects_stream_without_content() -> None:
+    model = streaming_model_with(FakeStreamingCompletions([("只有推理", None)]))
+    plan = ToolPlan(
+        tool_name="find_samples",
+        arguments={"query": {"limit": 1}},
+        rationale="查找样本。",
+    )
+
+    with pytest.raises(AgentModelError, match="empty answer"):
+        _ = [
+            chunk
+            async for chunk in model.stream_answer(
+                "找一个样本",
+                plan,
+                {"items": []},
+            )
+        ]
