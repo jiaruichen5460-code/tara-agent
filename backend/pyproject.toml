@@ -1,0 +1,49 @@
+[project]
+name = "tara-agent-backend"
+version = "0.1.0"
+description = "Backend service for the Tara-Agent MVP"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "duckdb>=1.4,<2",
+    "fastapi[standard-no-fastapi-cloud-cli]>=0.141,<1",
+    "polars>=1.38,<2",
+    "psutil>=7,<8",
+    "pydantic-settings>=2.7,<3",
+]
+
+[project.scripts]
+tara-data = "tara_agent.data.cli:main"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28,<1",
+    "pytest>=8.3,<9",
+    "pytest-cov>=6,<8",
+    "ruff>=0.9,<1",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.fastapi]
+entrypoint = "tara_agent.api.app:app"
+
+[tool.uv.build-backend]
+module-name = "tara_agent"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "integration: checks against the local Tara source datasets",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
