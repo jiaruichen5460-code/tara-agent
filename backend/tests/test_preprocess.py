@@ -57,6 +57,8 @@ def test_preprocess_is_read_only_repeatable_and_accessible(
         key: artifact.sha256 for key, artifact in forced.manifest.artifacts.items()
     }
     assert forced.manifest.metrics == first.manifest.metrics
+    assert forced.manifest.benchmark_report is None
+    assert not (processed_dir / forced.manifest.generation / "benchmark.json").exists()
     assert not list(processed_dir.glob(".staging-*"))
 
     store = ProcessedDataStore(processed_dir)

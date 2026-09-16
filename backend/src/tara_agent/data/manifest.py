@@ -70,7 +70,7 @@ class DataManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    manifest_version: int = 1
+    manifest_version: int = 2
     pipeline_version: str
     generation: str
     created_at_utc: str
@@ -79,7 +79,11 @@ class DataManifest(BaseModel):
     coverage: CoverageRecord
     metrics: ProcessingMetrics
     validation_report: str
-    benchmark_report: str
+    benchmark_report: str | None = Field(
+        default=None,
+        exclude=True,
+        description="Legacy manifest v1 field accepted for backward compatibility.",
+    )
 
     @classmethod
     def load(cls, path: Path) -> DataManifest:
@@ -90,7 +94,7 @@ class DataManifest(BaseModel):
     def write(self, path: Path) -> None:
         """Write stable, human-readable JSON. Atomic replacement is handled by the caller."""
 
-        payload = self.model_dump(mode="json")
+        payload = self.model_dump(mode="json", exclude_none=True)
         path.write_text(
             json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
             encoding="utf-8",

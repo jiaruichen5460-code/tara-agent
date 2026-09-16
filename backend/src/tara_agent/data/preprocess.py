@@ -6,16 +6,13 @@ import hashlib
 import json
 import os
 import shutil
-import statistics
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
 
-import duckdb
 import polars as pl
 import psutil
 
@@ -28,7 +25,7 @@ from tara_agent.data.manifest import (
     SourceFileRecord,
 )
 
-PIPELINE_VERSION = "2.0.4"
+PIPELINE_VERSION = "2.1.0"
 MANIFEST_FILENAME = "manifest.json"
 
 GENERAL_SCHEMA: dict[str, pl.DataType] = {
@@ -177,10 +174,6 @@ def preprocess(
         validation_path = staging_dir / "validation.json"
         _write_json(validation_path, validation)
 
-        benchmark = _benchmark_queries(source_dir, staging_dir, marker_samples["v4"])
-        benchmark_path = staging_dir / "benchmark.json"
-        _write_json(benchmark_path, benchmark)
-
         after = _snapshot_sources(source_dir)
         if sources != after:
             raise PreprocessingError("A source TSV changed while preprocessing was running")
@@ -205,7 +198,6 @@ def preprocess(
                 output_bytes=output_bytes,
             ),
             validation_report="validation.json",
-            benchmark_report="benchmark.json",
         )
 
         final_dir = processed_dir / generation
@@ -557,114 +549,6 @@ def _validate_coverage(
         context_without_marker_sample_ids=context_without_marker,
         marker_samples_missing_context=missing,
     )
-
-
-def _benchmark_queries(
-    source_dir: Path, staging_dir: Path, samples: list[str]
-) -> dict[str, Any]:
-    selected = samples[:8]
-    source_path = source_dir / MARKER_FILES["v4"]
-    header = _read_header(source_path)
-    source_schema = {
-        **MARKER_METADATA_SCHEMA,
-        **dict.fromkeys(header[len(AMPLICON_METADATA_COLUMNS) :], pl.UInt32),
-    }
-    pattern = "Dinoflagellata"
-
-    def raw_query() -> tuple[int, ...]:
-        result = (
-            _scan_tsv(source_path, source_schema)
-            .select("taxonomy", *selected)
-            .filter(pl.col("taxonomy").str.contains(pattern, literal=True))
-            .select(pl.col(selected).sum())
-            .collect(engine="streaming")
-        )
-        return tuple(result.row(0))
-
-    metadata_path = staging_dir / "v4_asv_metadata.parquet"
-    abundance_path = staging_dir / "v4_abundance.parquet"
-
-    def polars_query() -> tuple[int, ...]:
-        matching = pl.scan_parquet(metadata_path).filter(
-            pl.col("taxonomy").str.contains(pattern, literal=True)
-        )
-        result = (
-            pl.scan_parquet(abundance_path)
-            .select("amplicon", *selected)
-            .join(matching.select("amplicon"), on="amplicon", how="inner")
-            .select(pl.col(selected).sum())
-            .collect(engine="streaming")
-        )
-        return tuple(result.row(0))
-
-    connection = duckdb.connect(":memory:")
-    connection.from_parquet(str(metadata_path)).create_view("asv_metadata")
-    connection.from_parquet(str(abundance_path)).create_view("abundance")
-    sums = ", ".join(f'SUM(a."{sample.replace(chr(34), chr(34) * 2)}")' for sample in selected)
-    sql = (
-        f"SELECT {sums} FROM abundance AS a "
-        "JOIN asv_metadata AS m USING (amplicon) WHERE contains(m.taxonomy, ?)"
-    )
-
-    def duckdb_query() -> tuple[int, ...]:
-        return tuple(connection.execute(sql, [pattern]).fetchone())
-
-    try:
-        raw_times, raw_result = _time_query(raw_query)
-        polars_times, polars_result = _time_query(polars_query)
-        duckdb_times, duckdb_result = _time_query(duckdb_query)
-    finally:
-        connection.close()
-
-    if raw_result != polars_result or raw_result != duckdb_result:
-        raise PreprocessingError("Benchmark engines returned different abundance results")
-
-    return {
-        "status": "passed",
-        "layout_decision": {
-            "context": "one joined Parquet table keyed by sample_id_pangaea",
-            "marker_metadata": "one Parquet table per marker keyed by amplicon",
-            "marker_abundance": "one wide Parquet matrix per marker; markers remain independent",
-            "reason": (
-                "Common queries filter taxonomy then aggregate a small sample subset. "
-                "Column projection avoids reading unrelated sample columns, while a long table "
-                "would materialize one row for every nonzero ASV/sample pair."
-            ),
-        },
-        "query": {
-            "marker": "v4",
-            "taxonomy_contains": pattern,
-            "selected_sample_count": len(selected),
-            "result_verified_equal": True,
-        },
-        "timings_ms": {
-            "raw_tsv_polars": raw_times,
-            "processed_parquet_polars": polars_times,
-            "processed_parquet_duckdb": duckdb_times,
-        },
-        "median_ms": {
-            "raw_tsv_polars": statistics.median(raw_times),
-            "processed_parquet_polars": statistics.median(polars_times),
-            "processed_parquet_duckdb": statistics.median(duckdb_times),
-        },
-        "official_documentation": [
-            "https://docs.pola.rs/api/python/stable/reference/api/polars.scan_csv.html",
-            "https://docs.pola.rs/api/python/stable/reference/lazyframe/api/polars.LazyFrame.sink_parquet.html",
-            "https://duckdb.org/docs/stable/data/parquet/overview",
-            "https://duckdb.org/docs/stable/guides/performance/file_formats",
-            "https://parquet.apache.org/docs/overview/",
-        ],
-    }
-
-
-def _time_query(query: Callable[[], tuple[int, ...]]) -> tuple[list[float], tuple[int, ...]]:
-    timings: list[float] = []
-    result: tuple[int, ...] = ()
-    for _ in range(3):
-        started = perf_counter()
-        result = query()
-        timings.append(round((perf_counter() - started) * 1_000, 3))
-    return timings, result
 
 
 def _snapshot_sources(source_dir: Path) -> dict[str, SourceFileRecord]:

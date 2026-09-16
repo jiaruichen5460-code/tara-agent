@@ -45,7 +45,8 @@ Thumbs.db
 # Logs
 *.log
 
-# Project documentation is kept local by request
+# Keep project plans local; track the project READMEs.
 *.md
+!/README.md
 !backend/README.md
 !frontend/README.md

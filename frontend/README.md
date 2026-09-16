@@ -4,7 +4,7 @@ This Next.js application is the Tara-Agent MVP analysis workspace. It owns inter
 presentation only; data selection and scientific calculations remain in the backend.
 
 ```powershell
-Copy-Item .env.example .env.local
+if (-not (Test-Path .env.local)) { Copy-Item .env.example .env.local }
 pnpm install
 pnpm dev
 ```

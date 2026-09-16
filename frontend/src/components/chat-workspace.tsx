@@ -29,10 +29,10 @@ const AnalysisChart = dynamic(
 );
 
 const examples = [
-  "找地中海表层且温度至少 20 度的样本",
-  "V4 中有哪些 Bacillariophyta ASV？",
-  "按极地分组比较 V9 的 Shannon 多样性",
-  "V4 Bacillariophyta 丰度和温度是否相关？",
+  { label: "样本与环境", question: "找地中海表层且温度至少 20 度的样本", icon: Map },
+  { label: "分类群", question: "V4 中有哪些 Bacillariophyta ASV？", icon: Braces },
+  { label: "多样性", question: "按极地分组比较 V9 的 Shannon 多样性", icon: Database },
+  { label: "环境关联", question: "V4 Bacillariophyta 丰度和温度是否相关？", icon: FlaskConical },
 ];
 
 type Run = {
@@ -168,12 +168,15 @@ export function ChatWorkspace() {
 
         <nav className="example-nav" aria-label="示例问题">
           <p className="sidebar-label">示例问题</p>
-          {examples.map((example, index) => (
-            <button key={example} type="button" onClick={() => void submit(example)} disabled={busy}>
-              {index === 0 ? <Map size={16} /> : index === 3 ? <FlaskConical size={16} /> : <Braces size={16} />}
-              <span>{example}</span>
-            </button>
-          ))}
+          {examples.map((example) => {
+            const Icon = example.icon;
+            return (
+              <button key={example.label} type="button" onClick={() => void submit(example.question)} disabled={busy}>
+                <Icon size={16} aria-hidden="true" />
+                <span>{example.question}</span>
+              </button>
+            );
+          })}
         </nav>
 
         <SystemStatus />
@@ -182,10 +185,10 @@ export function ChatWorkspace() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <span className="context-label">当前空间</span>
-            <h1>Tara Oceans 核心数据</h1>
+            <span className="context-label">研究工作台</span>
+            <h1>Tara Oceans 数据分析</h1>
           </div>
-          <div className="marker-note"><span />V4 / V9 独立分析</div>
+          <div className="marker-note"><span />18S V4 / V9 分开分析</div>
         </header>
 
         <div className="conversation" aria-live="polite">
@@ -227,13 +230,20 @@ function EmptyState({ onExample }: { onExample: (question: string) => Promise<vo
   return (
     <section className="empty-state">
       <div className="empty-icon"><Database size={26} aria-hidden="true" /></div>
-      <p className="context-label">TRACEABLE OCEAN ANALYSIS</p>
-      <h2>从一个具体问题开始</h2>
-      <p>查询 Tara 样本和真核生物组成，或执行受控的丰度、多样性与环境关联分析。</p>
-      <button type="button" onClick={() => void onExample(examples[3])}>
-        尝试环境关联问题
-        <ArrowUp size={16} />
-      </button>
+      <p className="context-label">TARA OCEANS · 可追溯分析</p>
+      <h2>从一个海洋数据问题开始</h2>
+      <p>查询样本和分类群，探索丰度、多样性及环境关联。分析过程与数据来源会随结果展示。</p>
+      <div className="example-grid" aria-label="选择一个示例问题">
+        {examples.map((example) => {
+          const Icon = example.icon;
+          return (
+            <button key={example.label} type="button" onClick={() => void onExample(example.question)}>
+              <span className="example-card-label"><Icon size={16} aria-hidden="true" />{example.label}</span>
+              <span className="example-card-question">{example.question}</span>
+            </button>
+          );
+        })}
+      </div>
     </section>
   );
 }

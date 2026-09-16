@@ -18,13 +18,13 @@ src/tara_agent/
 Run the reproducible preprocessing pipeline through the project entrypoint:
 
 ```powershell
-py -m uv run tara-data
+uv run tara-data
 ```
 
 Use `--force` to rebuild and verify that Parquet checksums are reproducible:
 
 ```powershell
-py -m uv run tara-data --force
+uv run tara-data --force
 ```
 
 Outputs are atomically published below `data/processed/`:
@@ -38,14 +38,23 @@ data/processed/
     ├── v4_abundance.parquet
     ├── v9_asv_metadata.parquet
     ├── v9_abundance.parquet
-    ├── validation.json
-    └── benchmark.json
+    └── validation.json
 ```
 
 V4 and V9 remain independent. ASV metadata is separated from each wide abundance matrix so
 taxonomy queries can scan a small file and abundance queries can project only the requested
 sample columns. `manifest.json` records source hashes, schemas, shapes, coverage, artifact hashes,
 processing time, and peak memory.
+
+Query-format benchmarking is intentionally separate from preprocessing. It is a development task
+that compares raw TSV with Parquet through Polars and DuckDB:
+
+```powershell
+uv run python benchmarks/query_formats.py
+```
+
+The script prints its JSON report to standard output. DuckDB is a development dependency and is
+not required by preprocessing, the API, MCP, or the Agent runtime.
 
 ## Deterministic queries
 
@@ -75,10 +84,10 @@ undefined calculations are returned as machine-readable warnings.
 ## Run and test
 
 ```powershell
-py -m uv run fastapi dev
-py -m uv run tara-mcp
-py -m uv run pytest
-py -m uv run ruff check .
+uv run fastapi dev
+uv run tara-mcp
+uv run pytest
+uv run ruff check .
 ```
 
 `tara-mcp` serves the six read-only MVP tools over stdio. Each tool reuses the analysis-layer

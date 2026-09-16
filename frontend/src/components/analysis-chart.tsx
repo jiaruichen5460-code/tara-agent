@@ -22,10 +22,11 @@ export function AnalysisChart({ chart }: AnalysisChartProps) {
       if (disposed || !element) {
         return;
       }
+      const theme = chartTheme();
       await plotly.react(
         element,
-        chartData(chart),
-        chartLayout(chart),
+        chartData(chart, theme),
+        chartLayout(chart, theme),
         chartConfig,
       );
     }
@@ -48,7 +49,31 @@ const chartConfig: Partial<Config> = {
   modeBarButtonsToRemove: ["lasso2d", "select2d"],
 };
 
-function chartData(chart: ChartSpec): Data[] {
+type ChartTheme = {
+  ink: string;
+  accent: string;
+  coral: string;
+  line: string;
+  lineStrong: string;
+  ocean: string;
+  land: string;
+};
+
+function chartTheme(): ChartTheme {
+  const styles = getComputedStyle(document.documentElement);
+  const color = (name: string) => styles.getPropertyValue(name).trim();
+  return {
+    ink: color("--ink"),
+    accent: color("--accent"),
+    coral: color("--coral"),
+    line: color("--line"),
+    lineStrong: color("--line-strong"),
+    ocean: color("--accent-soft"),
+    land: color("--map-land"),
+  };
+}
+
+function chartData(chart: ChartSpec, theme: ChartTheme): Data[] {
   if (chart.kind === "sample_map") {
     return [
       {
@@ -57,8 +82,8 @@ function chartData(chart: ChartSpec): Data[] {
         lon: chart.x as number[],
         lat: chart.y,
         text: chart.labels,
-        hovertemplate: "%{text}<br>Lon %{lon:.2f}<br>Lat %{lat:.2f}<extra></extra>",
-        marker: { color: "#087f72", size: 8, line: { color: "#ffffff", width: 1 } },
+        hovertemplate: "%{text}<br>经度 %{lon:.2f}<br>纬度 %{lat:.2f}<extra></extra>",
+        marker: { color: theme.accent, size: 8, line: { color: "#ffffff", width: 1 } },
       },
     ];
   }
@@ -69,7 +94,7 @@ function chartData(chart: ChartSpec): Data[] {
         x: chart.x,
         y: chart.y,
         text: chart.labels,
-        marker: { color: "#087f72" },
+        marker: { color: theme.accent },
         hovertemplate: "%{x}<br>%{y:.4g}<extra></extra>",
       },
     ];
@@ -81,20 +106,20 @@ function chartData(chart: ChartSpec): Data[] {
       x: chart.x,
       y: chart.y,
       text: chart.labels,
-      marker: { color: "#d06b3c", size: 8, opacity: 0.78 },
+      marker: { color: theme.coral, size: 8, opacity: 0.78 },
       hovertemplate: "%{text}<br>x %{x:.4g}<br>y %{y:.4g}<extra></extra>",
     },
   ];
 }
 
-function chartLayout(chart: ChartSpec): Partial<Layout> {
+function chartLayout(chart: ChartSpec, theme: ChartTheme): Partial<Layout> {
   const shared: Partial<Layout> = {
     autosize: true,
     height: 340,
     margin: { l: 58, r: 24, t: 52, b: 68 },
     paper_bgcolor: "#ffffff",
     plot_bgcolor: "#ffffff",
-    font: { family: "Inter, system-ui, sans-serif", color: "#18302e", size: 12 },
+    font: { family: "Inter, system-ui, sans-serif", color: theme.ink, size: 12 },
     title: { text: chart.title, x: 0.02, xanchor: "left", font: { size: 15 } },
   };
   if (chart.kind === "sample_map") {
@@ -104,17 +129,17 @@ function chartLayout(chart: ChartSpec): Partial<Layout> {
       geo: {
         projection: { type: "natural earth" },
         showland: true,
-        landcolor: "#e7ebe8",
+        landcolor: theme.land,
         showocean: true,
-        oceancolor: "#e8f3f4",
+        oceancolor: theme.ocean,
         showcountries: true,
-        countrycolor: "#c5ceca",
+        countrycolor: theme.lineStrong,
       },
     };
   }
   return {
     ...shared,
-    xaxis: { title: { text: chart.x_label }, gridcolor: "#e7ece9", automargin: true },
-    yaxis: { title: { text: chart.y_label }, gridcolor: "#e7ece9", zeroline: false },
+    xaxis: { title: { text: chart.x_label }, gridcolor: theme.line, automargin: true },
+    yaxis: { title: { text: chart.y_label }, gridcolor: theme.line, zeroline: false },
   };
 }
