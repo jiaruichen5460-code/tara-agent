@@ -34,3 +34,11 @@ def test_generated_data_cannot_be_placed_inside_source_data(tmp_path: Path) -> N
             processed_data_dir=source_dir / "generated",
             _env_file=None,
         )
+
+
+def test_auth_cookie_is_secure_only_in_production() -> None:
+    development = Settings(environment="development", _env_file=None)
+    production = Settings(environment="production", _env_file=None)
+
+    assert development.auth_cookie_secure is False
+    assert production.auth_cookie_secure is True

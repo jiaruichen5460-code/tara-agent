@@ -6,7 +6,7 @@ from mcp import Client
 from mcp.server import MCPServer
 
 from tara_agent.data.preprocess import preprocess
-from tara_agent.data.store import ProcessedDataStore
+from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.mcp import create_server
 
 
@@ -18,7 +18,7 @@ def mcp_server(preprocessable_dataset_dir: Path, tmp_path: Path) -> MCPServer:
         processed_dir,
         enforce_expected_shape=False,
     )
-    return create_server(ProcessedDataStore(processed_dir))
+    return create_server(ProcessedDataReader(processed_dir))
 
 
 @pytest.fixture

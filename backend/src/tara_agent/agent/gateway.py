@@ -1,4 +1,4 @@
-"""Whitelisted in-memory MCP client used by the Agent workflow."""
+"""供 Agent 工作流使用的内存中 MCP 白名单客户端。"""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ from tara_agent.agent.models import ToolDefinition, ToolName
 
 
 class AgentToolError(RuntimeError):
-    """Raised when an allowed MCP tool cannot complete a call."""
+    """获准的 MCP 工具无法完成调用时抛出。"""
 
 
 class MCPToolGateway:
-    """Expose only the six approved Tara tools to the Agent."""
+    """仅向 Agent 提供六个获准的 Tara 工具。"""
 
     def __init__(self, server: MCPServer) -> None:
         self.server = server

@@ -1,4 +1,4 @@
-"""Model Context Protocol transport for Tara-Agent tools."""
+"""Tara Agent 工具的模型上下文协议传输层。"""
 
 from tara_agent.mcp.server import create_server
 

@@ -1,4 +1,4 @@
-"""Thin MCP adapters for deterministic Tara query and analysis services."""
+"""确定性 Tara 查询与分析服务的轻量 MCP 适配层。"""
 
 from collections.abc import Callable
 from typing import Annotated
@@ -35,86 +35,86 @@ def register_tools(
     query_service: TaraQueryService,
     scientific_service: TaraScientificService,
 ) -> None:
-    """Register the six MVP tools without adding business logic."""
+    """注册六个 MVP 工具，不增加业务逻辑。"""
 
-    @server.tool(title="Find Tara samples", annotations=READ_ONLY)
+    @server.tool(title="查询 Tara 样本", annotations=READ_ONLY)
     def find_samples(
         query: Annotated[
             FindSamplesQuery,
             Field(
-                description="Bounded sample filters.",
+                description="受限的样本筛选条件。",
                 examples=[{"ocean_region_contains": "Mediterranean", "limit": 20}],
             ),
         ],
     ) -> FindSamplesResult:
-        """Find sample contexts using explicit, bounded environmental filters."""
+        """使用明确且受限的环境条件查询样本背景信息。"""
 
         return _call(lambda: query_service.find_samples(query))
 
-    @server.tool(title="Get Tara sample information", annotations=READ_ONLY)
+    @server.tool(title="获取 Tara 样本信息", annotations=READ_ONLY)
     def get_sample_info(
         sample_id: Annotated[
             str,
             Field(
                 min_length=1,
                 max_length=100,
-                description="Exact PANGAEA sample ID.",
+                description="准确的 PANGAEA 样本 ID。",
                 examples=["TARA_A100000005"],
             ),
         ],
     ) -> SampleInfoResult:
-        """Get the complete validated context for one exact PANGAEA sample ID."""
+        """根据准确的 PANGAEA 样本 ID 获取完整且已校验的背景信息。"""
 
         return _call(lambda: query_service.get_sample_info(sample_id))
 
-    @server.tool(title="Find Tara taxa", annotations=READ_ONLY)
+    @server.tool(title="查询 Tara 分类单元", annotations=READ_ONLY)
     def find_taxa(
         query: Annotated[
             FindTaxaQuery,
             Field(
-                description="Marker-specific taxonomy query.",
+                description="针对指定标记的分类学查询。",
                 examples=[{"marker": "v4", "taxon": "Bacillariophyta"}],
             ),
         ],
     ) -> FindTaxaResult:
-        """Find matching ASVs and sample occurrences within one marker."""
+        """在指定标记中查询匹配的 ASV 及其样本出现情况。"""
 
         return _call(lambda: query_service.find_taxa(query))
 
-    @server.tool(title="Calculate taxon abundance", annotations=READ_ONLY)
+    @server.tool(title="计算分类单元丰度", annotations=READ_ONLY)
     def taxon_abundance(
         query: Annotated[
             TaxonAbundanceQuery,
             Field(
-                description="Marker-specific abundance request.",
+                description="针对指定标记的丰度计算请求。",
                 examples=[{"marker": "v4", "taxon": "Bacillariophyta"}],
             ),
         ],
     ) -> TaxonAbundanceResult:
-        """Calculate raw reads and within-sample relative abundance for one taxon."""
+        """计算一个分类单元的原始测序读数和样本内相对丰度。"""
 
         return _call(lambda: scientific_service.taxon_abundance(query))
 
-    @server.tool(title="Calculate Tara alpha diversity", annotations=READ_ONLY)
+    @server.tool(title="计算 Tara Alpha 多样性", annotations=READ_ONLY)
     def diversity_analysis(
         query: Annotated[
             DiversityQuery,
             Field(
-                description="Marker-specific alpha diversity request.",
+                description="针对指定标记的 Alpha 多样性计算请求。",
                 examples=[{"marker": "v9", "group_by": "polar"}],
             ),
         ],
     ) -> DiversityResult:
-        """Calculate unrarefied observed ASV richness and Shannon diversity."""
+        """计算未稀释抽样的观测 ASV 丰富度与 Shannon 多样性。"""
 
         return _call(lambda: scientific_service.diversity_analysis(query))
 
-    @server.tool(title="Analyze a Tara environment association", annotations=READ_ONLY)
+    @server.tool(title="分析 Tara 环境关联", annotations=READ_ONLY)
     def environment_association(
         query: Annotated[
             EnvironmentAssociationQuery,
             Field(
-                description="One taxon and one allowlisted environmental variable.",
+                description="一个分类单元和一个允许使用的环境变量。",
                 examples=[
                     {
                         "marker": "v4",
@@ -125,13 +125,13 @@ def register_tools(
             ),
         ],
     ) -> EnvironmentAssociationResult:
-        """Calculate one pairwise-complete Spearman abundance association."""
+        """计算一次基于成对完整观测值的 Spearman 丰度关联。"""
 
         return _call(lambda: scientific_service.environment_association(query))
 
 
 def _call[ResultT](operation: Callable[[], ResultT]) -> ResultT:
-    """Expose errors that a model can correct while keeping other failures private."""
+    """仅暴露模型可以纠正的错误，其他故障不对外公开。"""
 
     try:
         return operation()

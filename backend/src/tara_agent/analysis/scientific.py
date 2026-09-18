@@ -1,4 +1,4 @@
-"""Deterministic MVP abundance, diversity, and environment analyses."""
+"""MVP 中确定性的丰度、多样性和环境关联分析。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from tara_agent.analysis.scientific_models import (
     TaxonSelection,
 )
 from tara_agent.analysis.taxonomy import taxonomy_predicate
-from tara_agent.data.store import ProcessedDataStore
+from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.domain.contracts import DataProvenance, Marker, ResultMetadata, ResultWarning
 
 COUNT_COLUMNS_PER_BATCH = 32
@@ -49,10 +49,10 @@ class _AbundanceCalculation:
 
 
 class TaraScientificService:
-    """Run scoped scientific calculations over validated marker matrices."""
+    """基于已校验的标记丰度矩阵执行限定范围的科学计算。"""
 
-    def __init__(self, store: ProcessedDataStore) -> None:
-        self.store = store
+    def __init__(self, reader: ProcessedDataReader) -> None:
+        self.reader = reader
 
     def taxon_abundance(self, query: TaxonAbundanceQuery) -> TaxonAbundanceResult:
         selection = self._resolve_samples(query.marker, query.sample_ids)
@@ -110,8 +110,8 @@ class TaraScientificService:
             ResultWarning(
                 code="unrarefied_diversity",
                 message=(
-                    "Observed richness and Shannon index were calculated from unrarefied "
-                    "read counts; library size can influence comparisons."
+                    "观测丰富度和 Shannon 指数基于未经稀释抽样的测序读数计算，"
+                    "测序量差异可能影响样本间比较。"
                 ),
             )
         ]
@@ -121,7 +121,7 @@ class TaraScientificService:
             warnings.append(
                 ResultWarning(
                     code="taxon_not_found",
-                    message="No ASV matched the requested taxonomy.",
+                    message="没有 ASV 匹配请求的分类单元。",
                 )
             )
         if zero_read_samples:
@@ -129,7 +129,7 @@ class TaraScientificService:
                 ResultWarning(
                     code="zero_reads_in_analysis_set",
                     message=(
-                        "Shannon index is undefined where the selected ASV set has zero reads."
+                        "所选 ASV 集合的测序读数为零时，Shannon 指数没有定义。"
                     ),
                     details={"sample_ids": zero_read_samples},
                 )
@@ -180,7 +180,7 @@ class TaraScientificService:
             warnings.append(
                 ResultWarning(
                     code="missing_environment_values_excluded",
-                    message="Samples with missing environment values were excluded pairwise.",
+                    message="环境变量缺失的样本未参与成对相关性计算。",
                     details={
                         "field": query.environment_variable.value,
                         "sample_count": missing_environment,
@@ -230,11 +230,11 @@ class TaraScientificService:
     def _resolve_samples(
         self, marker: Marker, requested: list[str] | None
     ) -> _SampleSelection:
-        marker_samples = set(self.store.marker_sample_ids(marker))
+        marker_samples = set(self.reader.marker_sample_ids(marker))
         if requested is None:
             return _SampleSelection(sorted(marker_samples), [], len(marker_samples))
 
-        context_samples = set(self.store.context_sample_ids())
+        context_samples = set(self.reader.context_sample_ids())
         unknown = sorted(set(requested) - context_samples)
         if unknown:
             raise ValueError(f"Unknown sample IDs: {unknown[:5]}")
@@ -247,7 +247,7 @@ class TaraScientificService:
         self, query: TaxonSelection, samples: list[str]
     ) -> _AbundanceCalculation:
         matching_ids = (
-            self.store.scan_asv_metadata(query.marker)
+            self.reader.scan_asv_metadata(query.marker)
             .filter(taxonomy_predicate(query.taxon, query.match_mode))
             .select("amplicon")
             .collect(engine="streaming")
@@ -257,7 +257,7 @@ class TaraScientificService:
         zero_libraries: list[str] = []
 
         for batch in self._sample_batches(samples):
-            abundance = self.store.scan_abundance(query.marker, batch).collect(
+            abundance = self.reader.scan_abundance(query.marker, batch).collect(
                 engine="streaming"
             )
             library_totals = self._column_sums(abundance, batch)
@@ -297,13 +297,13 @@ class TaraScientificService:
         self, query: DiversityQuery
     ) -> tuple[pl.Series | None, int]:
         if query.taxon is None:
-            count = self.store.manifest.artifacts[
+            count = self.reader.manifest.artifacts[
                 f"{query.marker.value}_metadata"
             ].row_count
             return None, count
 
         amplicons = (
-            self.store.scan_asv_metadata(query.marker)
+            self.reader.scan_asv_metadata(query.marker)
             .filter(taxonomy_predicate(query.taxon, query.match_mode))
             .select("amplicon")
             .collect(engine="streaming")
@@ -319,7 +319,7 @@ class TaraScientificService:
     ) -> list[DiversityObservation]:
         observations: list[DiversityObservation] = []
         for batch in self._sample_batches(samples):
-            abundance = self.store.scan_abundance(marker, batch).collect(
+            abundance = self.reader.scan_abundance(marker, batch).collect(
                 engine="streaming"
             )
             if amplicons is not None:
@@ -357,7 +357,7 @@ class TaraScientificService:
             return [], []
 
         sample_ids = [item.sample_id for item in observations]
-        context = self.store.load_sample_context(sample_ids).select(
+        context = self.reader.load_sample_context(sample_ids).select(
             "sample_id_pangaea", group_field
         )
         group_by_sample = {
@@ -381,7 +381,7 @@ class TaraScientificService:
             warnings.append(
                 ResultWarning(
                     code="missing_group_values_excluded",
-                    message="Samples with missing grouping values were excluded from summaries.",
+                    message="分组变量缺失的样本未纳入分组汇总。",
                     details={"field": group_field, "sample_count": missing},
                 )
             )
@@ -412,7 +412,7 @@ class TaraScientificService:
             return [], 0
         sample_ids = [item.sample_id for item in observations]
         field = query.environment_variable.value
-        context = self.store.load_sample_context(sample_ids).select(
+        context = self.reader.load_sample_context(sample_ids).select(
             "sample_id_pangaea", field
         )
         environment = {
@@ -447,7 +447,7 @@ class TaraScientificService:
             return None, None, [
                 ResultWarning(
                     code="insufficient_samples",
-                    message="Spearman correlation requires at least three complete samples.",
+                    message="Spearman 相关性计算至少需要三个数据完整的样本。",
                     details={"sample_count": sample_count},
                 )
             ]
@@ -458,7 +458,7 @@ class TaraScientificService:
             return None, None, [
                 ResultWarning(
                     code="constant_input",
-                    message="Spearman correlation is undefined for a constant input.",
+                    message="输入值全部相同时，Spearman 相关系数没有定义。",
                 )
             ]
 
@@ -469,7 +469,7 @@ class TaraScientificService:
             return None, None, [
                 ResultWarning(
                     code="undefined_correlation",
-                    message="Spearman correlation returned a non-finite result.",
+                    message="Spearman 相关性计算未得到有限数值结果。",
                 )
             ]
 
@@ -479,9 +479,8 @@ class TaraScientificService:
                 ResultWarning(
                     code="asymptotic_p_value_caution",
                     message=(
-                        "SciPy documents the asymptotic Spearman p-value as most accurate "
-                        "for sample sizes above 500; interpret this exploratory p-value "
-                        "with caution."
+                        "SciPy 文档说明，Spearman 渐近 p 值在样本量大于 500 时最准确；"
+                        "当前探索性 p 值需要谨慎解释。"
                     ),
                     details={"sample_count": sample_count},
                 )
@@ -512,8 +511,8 @@ class TaraScientificService:
             ResultWarning(
                 code="read_count_is_not_cell_abundance",
                 message=(
-                    "Raw reads and read-based relative abundance are sequencing signals, "
-                    "not direct measurements of cell abundance."
+                    "原始测序读数及据此计算的相对丰度属于测序信号，"
+                    "不是对细胞丰度的直接测量。"
                 ),
             )
         ]
@@ -521,7 +520,7 @@ class TaraScientificService:
             warnings.append(
                 ResultWarning(
                     code="taxon_not_found",
-                    message="No ASV matched the requested taxonomy.",
+                    message="没有 ASV 匹配请求的分类单元。",
                 )
             )
         warnings.extend(self._unavailable_sample_warnings(unavailable_samples))
@@ -529,7 +528,7 @@ class TaraScientificService:
             warnings.append(
                 ResultWarning(
                     code="zero_read_library",
-                    message="Relative abundance is undefined for samples with zero total reads.",
+                    message="样本总测序读数为零时，相对丰度没有定义。",
                     details={"sample_ids": zero_library_samples},
                 )
             )
@@ -542,7 +541,7 @@ class TaraScientificService:
         return [
             ResultWarning(
                 code="samples_missing_marker_excluded",
-                message="Context samples without the requested marker were excluded.",
+                message="不含所请求标记数据的背景样本未参与本次分析。",
                 details={"sample_ids": samples, "sample_count": len(samples)},
             )
         ]

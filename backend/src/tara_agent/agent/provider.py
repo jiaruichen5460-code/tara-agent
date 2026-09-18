@@ -1,4 +1,4 @@
-"""DeepSeek-backed planning and answer generation with a testable interface."""
+"""基于 DeepSeek 的问题规划与答案生成，提供可测试的接口。"""
 
 from __future__ import annotations
 
@@ -8,43 +8,66 @@ from typing import Any, Protocol
 
 from openai import AsyncOpenAI, OpenAIError
 
-from tara_agent.agent.models import ModelStreamDelta, ToolDefinition, ToolPlan
+from tara_agent.agent.models import (
+    ModelStreamDelta,
+    ModelUsage,
+    ToolDefinition,
+    ToolName,
+    ToolPlan,
+)
 from tara_agent.config import Settings
 
 PLANNER_SYSTEM_PROMPT = """
-You are the planning component of Tara-Agent. Select exactly one available MCP tool for the
-user's Tara Oceans question. Never propose Python, SQL, filesystem access, or an unlisted tool.
-Call exactly one supplied tool. Arguments must match the selected tool's input schema exactly.
-Use marker v4 or v9 explicitly for marker analyses. Default taxonomy matching to level unless the
-user clearly requests substring matching. Never invent a sample ID, marker, taxon, filter value,
-or environmental variable that the user did not supply.
+你是 Tara Agent 的任务规划组件。针对用户提出的 Tara Oceans 问题，从可用的 MCP 工具中
+选择且仅选择一个工具。不得建议执行 Python、SQL、文件系统访问或任何未列出的工具。
+必须调用且仅调用一个已提供的工具，参数必须严格符合该工具的输入结构。
+涉及标记分析时必须明确使用 v4 或 v9。除非用户明确要求子字符串匹配，否则分类学查询
+默认使用层级匹配。不得虚构用户没有提供的样本 ID、标记、分类单元、筛选值或环境变量。
 
-Argument rules:
-- Include an optional filter only when the user explicitly states that constraint.
-- Preserve scientific names and exact sample IDs from the question.
-- Translate a user-supplied Chinese place name to the English dataset term; for example, 地中海
-  means Mediterranean.
-- When the user asks for exactly one result, set the corresponding limit to 1.
+参数规则：
+- 只有用户明确提出某项约束时，才加入对应的可选筛选参数。
+- 保留问题中的学名和准确样本 ID。
+- 将用户给出的中文地名转换为数据集使用的英文名称，例如将“地中海”转换为
+  “Mediterranean”。
+- 用户明确只要一条结果时，将对应的结果数量上限设为 1。
 
-Selection rules:
-- Use get_sample_info only when the user supplies an exact sample ID in the question.
-- Use find_samples when the user asks to find, filter, or list samples by location or environment.
-- Use find_taxa to list matching ASVs or taxonomy occurrences, not to calculate abundance.
-- Use taxon_abundance only for raw reads or relative abundance.
-- Use diversity_analysis only for observed ASV richness or Shannon diversity.
-- Use environment_association only for correlation with one allowlisted environmental variable.
+工具选择规则：
+- 仅当用户给出准确样本 ID 时使用 get_sample_info。
+- 用户按地点或环境条件查找、筛选或列出样本时使用 find_samples。
+- 列出匹配的 ASV 或分类学出现情况时使用 find_taxa，不用它计算丰度。
+- 只有查询原始测序读数或相对丰度时使用 taxon_abundance。
+- 只有查询观测 ASV 丰富度或 Shannon 多样性时使用 diversity_analysis。
+- 只有查询与允许使用的某个环境变量之间的相关性时使用 environment_association。
 """.strip()
 
 ANSWER_SYSTEM_PROMPT = """
-You are Tara-Agent. Answer the user's question using only the supplied deterministic tool result.
-Be concise, scientifically cautious, and mention important warnings. Do not invent values, causal
-claims, or analyses that are absent from the result. V4 and V9 are independent markers. The JSON
-result may be truncated for answer generation, while the application still receives the full data.
+你是 Tara Agent。只能依据所提供的确定性工具结果回答用户问题。回答应使用中文，简洁、
+清晰并保持科学审慎。不得虚构结果中不存在的数值、因果关系或分析。V4 与 V9 是相互独立
+的标记，不得直接合并解释。
+
+回答结构：
+1. 先直接回答用户的核心问题。
+2. 再概括支持结论的关键数量、趋势或统计结果。
+3. 只有在会影响结果解释时，才简要说明数据范围、缺失值处理或方法限制。
+
+界面会单独展示图表和结构化结果，因此不得逐条复述样本、ASV、观测值或相关性数据，
+不得列出前若干条记录作为示例，也不得输出原始 JSON。提供给你的工具结果是用于组织回答
+的摘要，完整明细由应用直接展示。若摘要中包含分页信息，只需准确说明查询结果总数，
+不要推断或描述当前页实际展示了多少条明细。
 """.strip()
+
+DETAIL_FIELDS_BY_TOOL: dict[ToolName, frozenset[str]] = {
+    ToolName.FIND_SAMPLES: frozenset({"items"}),
+    ToolName.FIND_TAXA: frozenset({"asvs", "sample_occurrences"}),
+    ToolName.TAXON_ABUNDANCE: frozenset({"observations"}),
+    ToolName.DIVERSITY_ANALYSIS: frozenset({"observations"}),
+    ToolName.ENVIRONMENT_ASSOCIATION: frozenset({"points"}),
+}
+PAGINATION_FIELDS = frozenset({"page", "asv_page", "sample_page", "point_page"})
 
 
 class AgentModelError(RuntimeError):
-    """Raised when the language model returns an unusable response."""
+    """语言模型返回无法使用的回复时抛出。"""
 
 
 class AgentModel(Protocol):
@@ -66,7 +89,7 @@ class AgentModel(Protocol):
 
 
 class DeepSeekChatModel:
-    """Use DeepSeek's OpenAI-compatible Chat Completions API."""
+    """使用 DeepSeek 兼容 OpenAI 的 Chat Completions API。"""
 
     def __init__(self, settings: Settings) -> None:
         if settings.deepseek_api_key is None:
@@ -82,6 +105,26 @@ class DeepSeekChatModel:
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def provider(self) -> str:
+        return "deepseek"
+
+    @property
+    def trace_parameters(self) -> dict[str, Any]:
+        """返回不含密钥、可用于链路追踪的模型请求配置。"""
+
+        return {
+            "planner": {
+                "max_tokens": 1_200,
+                "thinking": "disabled",
+            },
+            "answer": {
+                "max_tokens": 4_000,
+                "reasoning_effort": self.reasoning_effort,
+                "thinking": "enabled",
+            },
+        }
 
     async def plan(
         self,
@@ -124,6 +167,7 @@ class DeepSeekChatModel:
                 tool_name=tool_call.function.name,
                 arguments=arguments,
                 rationale=f"问题需要调用 {tool_call.function.name}。",
+                usage=_model_usage(getattr(response, "usage", None)),
             )
         except (TypeError, ValueError) as exc:
             raise AgentModelError("DeepSeek returned an invalid tool plan") from exc
@@ -134,7 +178,7 @@ class DeepSeekChatModel:
         plan: ToolPlan,
         result: dict[str, Any],
     ) -> AsyncIterator[ModelStreamDelta]:
-        compact_result = _compact_value(result)
+        compact_result = _result_for_model(plan.tool_name, result)
         user_content = json.dumps(
             {
                 "question": question,
@@ -153,10 +197,14 @@ class DeepSeekChatModel:
                 max_tokens=4_000,
                 reasoning_effort=self.reasoning_effort,
                 stream=True,
+                stream_options={"include_usage": True},
                 extra_body={"thinking": {"type": "enabled"}},
             )
             received_content = False
             async for chunk in stream:
+                usage = _model_usage(getattr(chunk, "usage", None))
+                if usage is not None:
+                    yield ModelStreamDelta(kind="usage", usage=usage)
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
@@ -174,22 +222,34 @@ class DeepSeekChatModel:
 
 
 def _compact_value(value: Any) -> Any:
-    """Bound model context without changing the structured API result."""
+    """限制模型上下文大小，同时不改变结构化 API 结果。"""
 
     if isinstance(value, dict):
         return {str(key): _compact_value(item) for key, item in value.items()}
     if isinstance(value, list):
-        items = [_compact_value(item) for item in value[:20]]
-        if len(value) > 20:
-            items.append({"truncated_items": len(value) - 20})
-        return items
+        return [_compact_value(item) for item in value[:20]]
     if isinstance(value, str) and len(value) > 300:
         return f"{value[:300]}..."
     return value
 
 
+def _result_for_model(tool_name: ToolName, result: dict[str, Any]) -> dict[str, Any]:
+    """移除由界面负责展示的明细记录，仅保留回答所需摘要。"""
+
+    detail_fields = DETAIL_FIELDS_BY_TOOL.get(tool_name, frozenset())
+    return {
+        str(key): (
+            {"total": value.get("total")}
+            if key in PAGINATION_FIELDS and isinstance(value, dict)
+            else _compact_value(value)
+        )
+        for key, value in result.items()
+        if key not in detail_fields
+    }
+
+
 def _schema_for_model(value: Any) -> Any:
-    """Remove generation hints while preserving the MCP validation contract."""
+    """移除生成提示，同时保留 MCP 校验契约。"""
 
     if isinstance(value, dict):
         return {
@@ -200,3 +260,19 @@ def _schema_for_model(value: Any) -> Any:
     if isinstance(value, list):
         return [_schema_for_model(item) for item in value]
     return value
+
+
+def _model_usage(value: Any) -> ModelUsage | None:
+    """把兼容 OpenAI 的用量对象转换为稳定的内部结构。"""
+
+    if value is None:
+        return None
+    prompt_details = getattr(value, "prompt_tokens_details", None)
+    completion_details = getattr(value, "completion_tokens_details", None)
+    return ModelUsage(
+        input_tokens=value.prompt_tokens,
+        output_tokens=value.completion_tokens,
+        total_tokens=value.total_tokens,
+        cached_tokens=getattr(prompt_details, "cached_tokens", None),
+        reasoning_tokens=getattr(completion_details, "reasoning_tokens", None),
+    )

@@ -58,7 +58,7 @@ async def test_chat_returns_answer_trace_and_chart(chat_app: FastAPI) -> None:
         "answer",
     ]
     assert payload["charts"][0]["kind"] == "sample_map"
-    assert payload["sources"] == ["context_general", "context_stat"]
+    assert payload["sources"] == ["context_general.tsv", "context_stat.tsv"]
 
 
 @pytest.mark.anyio

@@ -1,23 +1,23 @@
-"""MCP server factory and stdio entrypoint."""
+"""MCP 服务工厂和标准输入输出入口。"""
 
 from mcp.server import MCPServer
 
 from tara_agent.analysis import TaraQueryService, TaraScientificService
 from tara_agent.config import get_settings
-from tara_agent.data.store import ProcessedDataStore
+from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.mcp.tools import register_tools
 
 
-def create_server(store: ProcessedDataStore | None = None) -> MCPServer:
-    """Create the Tara MCP server over one validated processed-data store."""
+def create_server(reader: ProcessedDataReader | None = None) -> MCPServer:
+    """基于一个已校验的处理后数据读取器创建 Tara MCP 服务。"""
 
-    if store is None:
+    if reader is None:
         settings = get_settings()
-        store = ProcessedDataStore(settings.processed_data_dir)
+        reader = ProcessedDataReader(settings.processed_data_dir)
 
     server = MCPServer(
         name="tara-agent",
-        title="Tara-Agent",
+        title="Tara Agent",
         version="0.1.0",
         instructions=(
             "Query and analyze the validated Tara Oceans MVP datasets. "
@@ -26,13 +26,13 @@ def create_server(store: ProcessedDataStore | None = None) -> MCPServer:
     )
     register_tools(
         server,
-        query_service=TaraQueryService(store),
-        scientific_service=TaraScientificService(store),
+        query_service=TaraQueryService(reader),
+        scientific_service=TaraScientificService(reader),
     )
     return server
 
 
 def main() -> None:
-    """Run the Tara MCP server over the standard stdio transport."""
+    """通过标准输入输出传输方式运行 Tara MCP 服务。"""
 
     create_server().run(transport="stdio")

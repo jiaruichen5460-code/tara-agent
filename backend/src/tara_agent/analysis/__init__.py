@@ -1,4 +1,4 @@
-"""Deterministic Tara query and analysis services."""
+"""确定性的 Tara 查询与分析服务。"""
 
 from tara_agent.analysis.models import (
     FindSamplesQuery,

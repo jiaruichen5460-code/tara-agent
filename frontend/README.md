@@ -1,6 +1,6 @@
-# Tara-Agent frontend
+# Tara Agent frontend
 
-This Next.js application is the Tara-Agent MVP analysis workspace. It owns interaction and
+This Next.js application is the Tara Agent MVP analysis workspace. It owns interaction and
 presentation only; data selection and scientific calculations remain in the backend.
 
 ```powershell

@@ -1,4 +1,4 @@
-"""Contracts for the Tara MVP scientific analyses."""
+"""Tara MVP 科学分析的数据契约。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from tara_agent.domain.contracts import Marker, ResultMetadata
 
 
 class MarkerSampleSelection(BaseModel):
-    """Select one marker and an optional subset of context sample IDs."""
+    """选择一个标记，并可选定部分背景样本 ID。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -32,7 +32,7 @@ class MarkerSampleSelection(BaseModel):
 
 
 class TaxonSelection(MarkerSampleSelection):
-    """Select one taxon using the shared explicit matching semantics."""
+    """按照共用的明确匹配规则选择一个分类单元。"""
 
     taxon: str = Field(max_length=200)
     match_mode: TaxonMatchMode = TaxonMatchMode.LEVEL
@@ -47,7 +47,7 @@ class TaxonSelection(MarkerSampleSelection):
 
 
 class TaxonAbundanceQuery(TaxonSelection):
-    """Request raw reads and within-sample relative abundance."""
+    """请求原始测序读数和样本内相对丰度。"""
 
     include_zero_samples: bool = True
     offset: int = Field(default=0, ge=0)
@@ -83,7 +83,7 @@ class DiversityGroup(StrEnum):
 
 
 class DiversityQuery(MarkerSampleSelection):
-    """Request unrarefied alpha diversity for selected samples."""
+    """请求所选样本未进行稀释抽样的 Alpha 多样性。"""
 
     taxon: str | None = Field(default=None, max_length=200)
     match_mode: TaxonMatchMode = TaxonMatchMode.LEVEL
@@ -160,7 +160,7 @@ class EnvironmentVariable(StrEnum):
 
 
 class EnvironmentAssociationQuery(TaxonSelection):
-    """Request one pairwise-complete Spearman association."""
+    """请求一次采用成对完整观测值的 Spearman 关联分析。"""
 
     environment_variable: EnvironmentVariable
     point_offset: int = Field(default=0, ge=0)

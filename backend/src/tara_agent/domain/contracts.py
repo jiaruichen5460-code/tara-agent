@@ -1,4 +1,4 @@
-"""Small, reusable contracts carried by future analysis results."""
+"""供后续分析结果使用的简洁、可复用数据契约。"""
 
 from enum import StrEnum
 from typing import Any
@@ -7,14 +7,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Marker(StrEnum):
-    """18S marker datasets must remain explicit and independent."""
+    """18S 标记数据集必须明确区分并保持独立。"""
 
     V4 = "v4"
     V9 = "v9"
 
 
 class ResultWarning(BaseModel):
-    """A machine-readable warning that does not invalidate a result."""
+    """不影响结果有效性的机器可读警告。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -24,7 +24,7 @@ class ResultWarning(BaseModel):
 
 
 class DataProvenance(BaseModel):
-    """Data inputs and filtering facts needed to interpret a result."""
+    """解释结果所需的数据输入与筛选信息。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -36,7 +36,7 @@ class DataProvenance(BaseModel):
 
 
 class ResultMetadata(BaseModel):
-    """Metadata shared by API and MCP analysis responses."""
+    """API 与 MCP 分析响应共用的元数据。"""
 
     model_config = ConfigDict(extra="forbid")
 

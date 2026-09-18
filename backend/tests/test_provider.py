@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -11,19 +12,28 @@ from tara_agent.config import Settings
 
 
 class FakeCompletions:
-    def __init__(self, tool_calls: list[Any]) -> None:
+    def __init__(self, tool_calls: list[Any], usage: Any = None) -> None:
         self.tool_calls = tool_calls
+        self.usage = usage
         self.request: dict[str, Any] = {}
 
     async def create(self, **kwargs: Any) -> Any:
         self.request = kwargs
         message = SimpleNamespace(tool_calls=self.tool_calls)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message)],
+            usage=self.usage,
+        )
 
 
 class FakeStreamingCompletions:
-    def __init__(self, deltas: list[tuple[str | None, str | None]]) -> None:
+    def __init__(
+        self,
+        deltas: list[tuple[str | None, str | None]],
+        usage: Any = None,
+    ) -> None:
         self.deltas = deltas
+        self.usage = usage
         self.request: dict[str, Any] = {}
 
     async def create(self, **kwargs: Any) -> Any:
@@ -32,7 +42,9 @@ class FakeStreamingCompletions:
         async def chunks():
             for reasoning, content in self.deltas:
                 delta = SimpleNamespace(content=content, reasoning_content=reasoning)
-                yield SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+                yield SimpleNamespace(choices=[SimpleNamespace(delta=delta)], usage=None)
+            if self.usage is not None:
+                yield SimpleNamespace(choices=[], usage=self.usage)
 
         return chunks()
 
@@ -130,7 +142,10 @@ async def test_answer_streams_reasoning_and_content_as_separate_deltas() -> None
         async for chunk in model.stream_answer(
             "找一个样本",
             plan,
-            {"items": []},
+            {
+                "items": [{"sample_id": str(index)} for index in range(25)],
+                "page": {"offset": 0, "limit": 100, "total": 50},
+            },
         )
     ]
 
@@ -140,7 +155,48 @@ async def test_answer_streams_reasoning_and_content_as_separate_deltas() -> None
         ("answer", "：可靠。"),
     ]
     assert completions.request["stream"] is True
+    assert completions.request["stream_options"] == {"include_usage": True}
     assert completions.request["reasoning_effort"] == "low"
+    user_content = json.loads(completions.request["messages"][1]["content"])
+    assert "items" not in user_content["tool_result"]
+    assert user_content["tool_result"]["page"] == {"total": 50}
+    assert "truncated_items" not in completions.request["messages"][1]["content"]
+
+
+@pytest.mark.anyio
+async def test_model_usage_is_returned_without_estimation() -> None:
+    usage = SimpleNamespace(
+        prompt_tokens=120,
+        completion_tokens=30,
+        total_tokens=150,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=20),
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=10),
+    )
+    planner = FakeCompletions(
+        [tool_call("find_samples", '{"query":{"limit":1}}')],
+        usage=usage,
+    )
+    plan = await model_with(planner).plan("找一个样本", [])
+    assert plan.usage is not None
+    assert plan.usage.model_dump() == {
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "total_tokens": 150,
+        "cached_tokens": 20,
+        "reasoning_tokens": 10,
+    }
+
+    streaming = FakeStreamingCompletions([(None, "结论")], usage=usage)
+    chunks = [
+        chunk
+        async for chunk in streaming_model_with(streaming).stream_answer(
+            "找一个样本",
+            plan,
+            {"items": []},
+        )
+    ]
+    assert chunks[-1].kind == "usage"
+    assert chunks[-1].usage == plan.usage
 
 
 @pytest.mark.anyio

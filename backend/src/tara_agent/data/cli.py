@@ -1,4 +1,4 @@
-"""Command-line entrypoint for Tara data preprocessing."""
+"""Tara 数据预处理的命令行入口。"""
 
 from __future__ import annotations
 

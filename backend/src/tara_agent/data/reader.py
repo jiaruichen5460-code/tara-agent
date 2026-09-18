@@ -1,4 +1,4 @@
-"""Deterministic access to validated, processed Tara data."""
+"""确定性地访问已校验、处理后的 Tara 数据。"""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from tara_agent.domain.contracts import Marker
 
 
 class ProcessedDataError(RuntimeError):
-    """Raised when processed data is absent, invalid, or queried incorrectly."""
+    """处理后数据缺失、无效或查询方式不正确时抛出。"""
 
 
-class ProcessedDataStore:
-    """Expose typed Parquet scans without access to source TSV files."""
+class ProcessedDataReader:
+    """提供具有明确类型的 Parquet 扫描能力，不访问原始 TSV。"""
 
     def __init__(self, processed_dir: Path) -> None:
         self.processed_dir = processed_dir.resolve(strict=False)
@@ -40,12 +40,12 @@ class ProcessedDataStore:
                 )
 
     def scan_context(self) -> pl.LazyFrame:
-        """Return all sample context with explicit Parquet-backed types and nulls."""
+        """返回全部样本背景信息，明确保留 Parquet 中的数据类型和空值。"""
 
         return pl.scan_parquet(self._artifact_path(self.manifest.artifacts["context"]))
 
     def load_sample_context(self, sample_ids: list[str] | None = None) -> pl.DataFrame:
-        """Load all context rows or a caller-specified set of sample IDs."""
+        """加载全部背景数据行，或调用方指定的样本 ID 对应行。"""
 
         query = self.scan_context()
         if sample_ids is not None:
@@ -54,7 +54,7 @@ class ProcessedDataStore:
         return query.collect()
 
     def context_sample_ids(self) -> list[str]:
-        """Return context sample IDs in their stable processed order."""
+        """按处理后数据的稳定顺序返回背景样本 ID。"""
 
         return (
             self.scan_context()
@@ -65,20 +65,20 @@ class ProcessedDataStore:
         )
 
     def scan_asv_metadata(self, marker: Marker) -> pl.LazyFrame:
-        """Return ASV taxonomy and metadata for one explicit marker."""
+        """返回指定标记的 ASV 分类信息和元数据。"""
 
         artifact = self.manifest.artifacts[f"{marker.value}_metadata"]
         return pl.scan_parquet(self._artifact_path(artifact))
 
     def marker_sample_ids(self, marker: Marker) -> list[str]:
-        """Return the sample columns available for a marker."""
+        """返回指定标记可用的样本列。"""
 
         return list(self.manifest.artifacts[f"{marker.value}_abundance"].repeated_columns)
 
     def scan_abundance(
         self, marker: Marker, sample_ids: list[str] | None = None
     ) -> pl.LazyFrame:
-        """Return one marker's wide count matrix, optionally projected to selected samples."""
+        """返回指定标记的宽格式读数矩阵，可选择仅保留指定样本。"""
 
         artifact = self.manifest.artifacts[f"{marker.value}_abundance"]
         available = set(artifact.repeated_columns)
@@ -93,7 +93,7 @@ class ProcessedDataStore:
         sample_ids: list[str] | None = None,
         taxonomy_contains: str | None = None,
     ) -> pl.DataFrame:
-        """Load joined ASV metadata and projected counts for deterministic analysis."""
+        """加载已关联的 ASV 元数据及选取的读数列，供确定性分析使用。"""
 
         metadata = self.scan_asv_metadata(marker)
         if taxonomy_contains is not None:

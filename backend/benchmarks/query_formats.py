@@ -1,4 +1,4 @@
-"""Compare representative Tara queries without affecting preprocessing."""
+"""在不影响预处理流程的前提下比较具有代表性的 Tara 查询。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import polars as pl
 from tara_agent.config import Settings
 from tara_agent.data.catalog import AMPLICON_METADATA_COLUMNS
 from tara_agent.data.preprocess import MARKER_FILES, MARKER_METADATA_SCHEMA
-from tara_agent.data.store import ProcessedDataStore
+from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.domain.contracts import Marker
 
 BENCHMARK_RUNS = 3
@@ -24,13 +24,13 @@ TAXONOMY_PATTERN = "Dinoflagellata"
 
 
 class BenchmarkError(RuntimeError):
-    """Raised when benchmark inputs or engine results are inconsistent."""
+    """基准测试输入或查询引擎结果不一致时抛出。"""
 
 
 def benchmark_query_formats(source_dir: Path, processed_dir: Path) -> dict[str, Any]:
-    """Time one equivalent query over raw TSV and processed Parquet data."""
+    """分别计时原始 TSV 和处理后 Parquet 上的一次等价查询。"""
 
-    store = ProcessedDataStore(processed_dir)
+    store = ProcessedDataReader(processed_dir)
     selected = store.marker_sample_ids(Marker.V4)[:SAMPLE_COUNT]
     source_path = source_dir / MARKER_FILES["v4"]
     source_schema = _source_schema(source_path)

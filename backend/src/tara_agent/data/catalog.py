@@ -1,4 +1,4 @@
-"""Lightweight, read-only validation of the four MVP source datasets."""
+"""对四份 MVP 原始数据集进行轻量级只读校验。"""
 
 import csv
 from dataclasses import dataclass
@@ -108,9 +108,15 @@ DATASET_SPECS = (
     ),
 )
 
+SOURCE_FILENAMES = {spec.key: spec.filename for spec in DATASET_SPECS}
+
+
+def source_filename(source_key: str) -> str:
+    return SOURCE_FILENAMES.get(source_key, source_key)
+
 
 class DatasetCatalog:
-    """Inspect source headers without loading large abundance matrices into memory."""
+    """检查源数据表头，无需将大型丰度矩阵载入内存。"""
 
     def __init__(self, source_dir: Path) -> None:
         self.source_dir = source_dir.resolve(strict=False)

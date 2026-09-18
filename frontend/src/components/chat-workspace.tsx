@@ -5,23 +5,36 @@ import {
   ArrowUp,
   BrainCircuit,
   Braces,
+  Check,
   ChevronDown,
+  Copy,
   Database,
+  FileText,
   FlaskConical,
+  Info,
   LoaderCircle,
-  Map,
+  Map as MapIcon,
   Network,
+  UserRound,
+  Waves,
 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ResultTable } from "@/components/result-table";
-import { SystemStatus } from "@/components/system-status";
-import type { AgentResponse, AgentStep, AgentStreamEvent } from "@/lib/types";
-
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+import { SessionSidebar } from "@/components/session-sidebar";
+import { apiBaseUrl, getSession } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
+import type {
+  AgentResponse,
+  AgentStep,
+  AgentStreamEvent,
+  ChatMessage,
+  SessionDetail,
+} from "@/lib/types";
 
 const AnalysisChart = dynamic(
   () => import("@/components/analysis-chart").then((module) => module.AnalysisChart),
@@ -29,7 +42,7 @@ const AnalysisChart = dynamic(
 );
 
 const examples = [
-  { label: "样本与环境", question: "找地中海表层且温度至少 20 度的样本", icon: Map },
+  { label: "样本与环境", question: "找地中海表层且温度至少 20 度的样本", icon: MapIcon },
   { label: "分类群", question: "V4 中有哪些 Bacillariophyta ASV？", icon: Braces },
   { label: "多样性", question: "按极地分组比较 V9 的 Shannon 多样性", icon: Database },
   { label: "环境关联", question: "V4 Bacillariophyta 丰度和温度是否相关？", icon: FlaskConical },
@@ -38,16 +51,25 @@ const examples = [
 type Run = {
   id: string;
   question: string;
+  createdAt: string;
+  completedAt?: string;
   steps: AgentStep[];
   streamedReasoning: string;
   streamedAnswer: string;
   response?: AgentResponse;
   error?: string;
+  historical?: boolean;
+  model?: string;
+  sources?: string[];
+  traceId?: string;
 };
 
 export function ChatWorkspace() {
   const [question, setQuestion] = useState("");
   const [runs, setRuns] = useState<Run[]>([]);
+  const [sessionId, setSessionId] = useState<string>();
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const [loadingSession, setLoadingSession] = useState(false);
   const [busy, setBusy] = useState(false);
   const followOutput = useRef(true);
   const canSubmit = question.trim().length > 0 && !busy;
@@ -81,7 +103,14 @@ export function ChatWorkspace() {
     followOutput.current = true;
     setRuns((current) => [
       ...current,
-      { id, question: normalized, steps: [], streamedReasoning: "", streamedAnswer: "" },
+      {
+        id,
+        question: normalized,
+        createdAt: new Date().toISOString(),
+        steps: [],
+        streamedReasoning: "",
+        streamedAnswer: "",
+      },
     ]);
     setQuestion("");
     setBusy(true);
@@ -109,6 +138,12 @@ export function ChatWorkspace() {
     };
 
     const handleEvent = (event: AgentStreamEvent) => {
+      if (event.event === "run_started" && event.session_id) {
+        setSessionId(event.session_id);
+      }
+      if (event.event === "complete" || event.event === "error") {
+        setHistoryVersion((current) => current + 1);
+      }
       if (
         (event.event === "reasoning_delta" || event.event === "answer_delta") &&
         event.delta
@@ -135,11 +170,15 @@ export function ChatWorkspace() {
     };
 
     try {
-      await streamQuestion(normalized, handleEvent);
+      await streamQuestion(normalized, sessionId, handleEvent);
     } catch (error) {
       const message = error instanceof Error ? error.message : "请求失败";
       setRuns((current) =>
-        current.map((run) => (run.id === id ? { ...run, error: message } : run)),
+        current.map((run) => (
+          run.id === id
+            ? { ...run, error: message, completedAt: new Date().toISOString() }
+            : run
+        )),
       );
     } finally {
       if (animationFrame !== null) {
@@ -155,44 +194,58 @@ export function ChatWorkspace() {
     void submit(question);
   }
 
+  function startNewSession() {
+    setSessionId(undefined);
+    setRuns([]);
+    setQuestion("");
+  }
+
+  function handleSessionsDeleted(sessionIds: string[]) {
+    if (sessionId && sessionIds.includes(sessionId)) {
+      startNewSession();
+    }
+  }
+
+  async function selectSession(nextSessionId: string) {
+    if (busy || loadingSession || nextSessionId === sessionId) {
+      return;
+    }
+    setLoadingSession(true);
+    try {
+      const session = await getSession(nextSessionId);
+      setSessionId(session.id);
+      setRuns(runsFromSession(session));
+      window.scrollTo({ top: 0, behavior: "auto" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "无法加载对话";
+      setRuns([failedHistoryRun(nextSessionId, message)]);
+    } finally {
+      setLoadingSession(false);
+    }
+  }
+
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand-block">
-          <div className="brand-mark" aria-hidden="true"><Network size={20} /></div>
-          <div>
-            <strong>Tara-Agent</strong>
-            <span>Oceans analysis MVP</span>
-          </div>
-        </div>
-
-        <nav className="example-nav" aria-label="示例问题">
-          <p className="sidebar-label">示例问题</p>
-          {examples.map((example) => {
-            const Icon = example.icon;
-            return (
-              <button key={example.label} type="button" onClick={() => void submit(example.question)} disabled={busy}>
-                <Icon size={16} aria-hidden="true" />
-                <span>{example.question}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <SystemStatus />
-      </aside>
+      <SessionSidebar
+        activeSessionId={sessionId}
+        refreshVersion={historyVersion}
+        disabled={busy || loadingSession}
+        onNewSession={startNewSession}
+        onSelectSession={(id) => void selectSession(id)}
+        onSessionsDeleted={handleSessionsDeleted}
+      />
 
       <main className="workspace">
         <header className="topbar">
           <div>
-            <span className="context-label">研究工作台</span>
-            <h1>Tara Oceans 数据分析</h1>
+            <span className="context-label">Tara Agent</span>
+            <h1>海洋数据分析</h1>
           </div>
-          <div className="marker-note"><span />18S V4 / V9 分开分析</div>
         </header>
 
         <div className="conversation" aria-live="polite">
-          {runs.length === 0 ? <EmptyState onExample={submit} /> : null}
+          {loadingSession ? <div className="workspace-loading"><LoaderCircle className="spin" />正在加载对话…</div> : null}
+          {!loadingSession && runs.length === 0 ? <EmptyState onExample={submit} /> : null}
           {runs.map((run) => <AnalysisRun key={run.id} run={run} />)}
         </div>
 
@@ -219,7 +272,6 @@ export function ChatWorkspace() {
               <span>{busy ? "分析中" : "发送"}</span>
             </button>
           </form>
-          <p>结果来自确定性分析工具；模型不读取原始数据，也不执行任意代码或 SQL。</p>
         </div>
       </main>
     </div>
@@ -229,10 +281,8 @@ export function ChatWorkspace() {
 function EmptyState({ onExample }: { onExample: (question: string) => Promise<void> }) {
   return (
     <section className="empty-state">
-      <div className="empty-icon"><Database size={26} aria-hidden="true" /></div>
-      <p className="context-label">TARA OCEANS · 可追溯分析</p>
-      <h2>从一个海洋数据问题开始</h2>
-      <p>查询样本和分类群，探索丰度、多样性及环境关联。分析过程与数据来源会随结果展示。</p>
+      <div className="empty-icon"><Waves size={27} aria-hidden="true" /></div>
+      <p className="context-label">Tara Agent</p>
       <div className="example-grid" aria-label="选择一个示例问题">
         {examples.map((example) => {
           const Icon = example.icon;
@@ -249,70 +299,143 @@ function EmptyState({ onExample }: { onExample: (question: string) => Promise<vo
 }
 
 function AnalysisRun({ run }: { run: Run }) {
-  const inProgress = !run.response && !run.error;
+  const inProgress = !run.historical && !run.response && !run.error;
   const reasoningActive = inProgress && !run.streamedAnswer;
+  const answer = run.response?.answer ?? run.streamedAnswer;
 
   return (
     <article className="analysis-run">
-      <div className="user-message">{run.question}</div>
+      <UserMessage question={run.question} createdAt={run.createdAt} />
       <div className="agent-response">
         <div className="agent-avatar" aria-hidden="true"><Network size={17} /></div>
-        <div className="response-content">
-          {inProgress ? (
-            <RunningSteps
-              steps={run.steps}
-              hasReasoning={Boolean(run.streamedReasoning)}
-              hasAnswer={Boolean(run.streamedAnswer)}
-            />
-          ) : null}
-          {run.streamedReasoning ? (
-            <ReasoningPanel reasoning={run.streamedReasoning} active={reasoningActive} />
-          ) : null}
-          {inProgress && run.streamedAnswer ? (
-            <StreamingAnswer answer={run.streamedAnswer} />
-          ) : null}
-          {run.error ? (
-            <>
-              {run.streamedAnswer ? <MarkdownAnswer answer={run.streamedAnswer} /> : null}
+        <div className="agent-message">
+          <div className="response-content">
+            {!run.historical || run.response ? (
+              <ProcessPanel steps={run.steps} response={run.response} active={inProgress} />
+            ) : null}
+            {run.streamedReasoning ? (
+              <ReasoningPanel reasoning={run.streamedReasoning} active={reasoningActive} />
+            ) : null}
+            {answer ? <AnswerPanel answer={answer} active={inProgress} /> : null}
+            {run.error ? (
               <div className="request-error"><AlertTriangle size={17} />{run.error}</div>
-            </>
+            ) : null}
+            {run.response ? (
+              <CompletedArtifacts
+                response={run.response}
+                timestamp={run.completedAt ?? run.createdAt}
+              />
+            ) : null}
+          </div>
+          {run.historical && !run.response ? (
+            <HistoricalMeta run={run} />
+          ) : !run.response ? (
+            <div className="message-meta agent-message-meta">
+              <time dateTime={run.completedAt ?? run.createdAt}>
+                {formatDateTime(run.completedAt ?? run.createdAt)}
+              </time>
+            </div>
           ) : null}
-          {run.response ? <CompletedResponse response={run.response} /> : null}
         </div>
       </div>
     </article>
   );
 }
 
-type RunningStepsProps = {
-  steps: AgentStep[];
-  hasReasoning: boolean;
-  hasAnswer: boolean;
-};
+function UserMessage({ question, createdAt }: { question: string; createdAt: string }) {
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<number | null>(null);
 
-function RunningSteps({ steps, hasReasoning, hasAnswer }: RunningStepsProps) {
-  const isPreparingAnswer = steps.some((step) => step.stage === "answer");
-  let status = "正在执行分析流程";
-  if (isPreparingAnswer) {
-    status = "正在准备回答";
-  }
-  if (hasReasoning) {
-    status = "正在思考";
-  }
-  if (hasAnswer) {
-    status = "正在生成回答";
+  useEffect(() => () => {
+    if (resetTimer.current !== null) {
+      window.clearTimeout(resetTimer.current);
+    }
+  }, []);
+
+  async function copyQuestion() {
+    try {
+      await navigator.clipboard.writeText(question);
+    } catch {
+      return;
+    }
+    setCopied(true);
+    if (resetTimer.current !== null) {
+      window.clearTimeout(resetTimer.current);
+    }
+    resetTimer.current = window.setTimeout(() => setCopied(false), 1_500);
   }
 
   return (
-    <div className={`running-steps${isPreparingAnswer ? " answering" : ""}`}>
-      <p>
-        <LoaderCircle className="spin" size={16} />
-        {status}
-      </p>
-      <ol>
-        {steps.map((step) => <li key={step.stage}><strong>{step.title}</strong><span>{step.detail}</span></li>)}
-      </ol>
+    <div className="user-turn">
+      <div className="user-message-block">
+        <div className="user-message">{question}</div>
+        <div className="message-meta user-message-meta">
+          <time dateTime={createdAt}>{formatDateTime(createdAt)}</time>
+          <button
+            type="button"
+            className="copy-message"
+            onClick={() => void copyQuestion()}
+            aria-label={copied ? "已复制问题" : "复制问题"}
+            title={copied ? "已复制" : "复制问题"}
+          >
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+          </button>
+        </div>
+      </div>
+      <div className="user-avatar" aria-hidden="true"><UserRound size={16} /></div>
     </div>
+  );
+}
+
+function HistoricalMeta({ run }: { run: Run }) {
+  return (
+    <footer className="provenance">
+      <time dateTime={run.completedAt ?? run.createdAt}>
+        {formatDateTime(run.completedAt ?? run.createdAt)}
+      </time>
+      {run.model ? <span>模型 {run.model}</span> : null}
+      {run.sources && run.sources.length > 0 ? (
+        <span className="source-files">
+          数据来源
+          {run.sources.map((source) => <code key={source}>{source}</code>)}
+        </span>
+      ) : null}
+      {run.traceId ? <Link href={`/traces?trace_id=${run.traceId}`}>查看链路</Link> : null}
+    </footer>
+  );
+}
+
+type ProcessPanelProps = {
+  steps: AgentStep[];
+  response?: AgentResponse;
+  active: boolean;
+};
+
+function ProcessPanel({ steps, response, active }: ProcessPanelProps) {
+  const serializedArguments = useMemo(
+    () => response ? JSON.stringify(response.tool.arguments, null, 2) : "",
+    [response],
+  );
+
+  return (
+    <DisclosureSection
+      className="process-panel"
+      icon={active ? <LoaderCircle className="spin" size={16} /> : <Network size={16} />}
+      title="分析过程"
+      meta={active ? "正在进行" : `${steps.length} 个步骤`}
+    >
+      {steps.length > 0 ? (
+        <ol>
+          {steps.map((step) => <li key={step.stage}><strong>{step.title}</strong><span>{step.detail}</span></li>)}
+        </ol>
+      ) : <p className="progress-placeholder">正在理解问题…</p>}
+      {response ? (
+        <div className="tool-call">
+          <span>调用工具</span><code>{response.tool.name}</code>
+          <pre>{serializedArguments}</pre>
+        </div>
+      ) : null}
+    </DisclosureSection>
   );
 }
 
@@ -338,28 +461,38 @@ function ReasoningPanel({ reasoning, active }: { reasoning: string; active: bool
 
   return (
     <details
-      className={`reasoning-panel${active ? " active" : ""}`}
+      className={`response-section reasoning-panel${active ? " active" : ""}`}
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>
         <BrainCircuit size={16} />
         <span>{active ? "正在思考" : "模型思考"}</span>
+        <small>{active ? "实时生成" : "已完成"}</small>
         <ChevronDown size={16} />
       </summary>
-      <div ref={contentRef} className="reasoning-content">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{reasoning}</ReactMarkdown>
+      <div className="section-body">
+        <div ref={contentRef} className="reasoning-content">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{reasoning}</ReactMarkdown>
+        </div>
       </div>
     </details>
   );
 }
 
-function StreamingAnswer({ answer }: { answer: string }) {
+function AnswerPanel({ answer, active }: { answer: string; active: boolean }) {
   return (
-    <div className="streaming-answer">
-      <MarkdownAnswer answer={answer} />
-      <span className="stream-caret" aria-hidden="true" />
-    </div>
+    <DisclosureSection
+      className="answer-panel"
+      icon={<FileText size={16} />}
+      title="分析结论"
+      meta={active ? "正在生成" : "已完成"}
+    >
+      <div className={active ? "streaming-answer" : undefined}>
+        <MarkdownAnswer answer={answer} />
+        {active ? <span className="stream-caret" aria-hidden="true" /> : null}
+      </div>
+    </DisclosureSection>
   );
 }
 
@@ -371,46 +504,179 @@ function MarkdownAnswer({ answer }: { answer: string }) {
   );
 }
 
-function CompletedResponse({ response }: { response: AgentResponse }) {
-  const serializedArguments = useMemo(
-    () => JSON.stringify(response.tool.arguments, null, 2),
-    [response.tool.arguments],
-  );
-
+function CompletedArtifacts({
+  response,
+  timestamp,
+}: {
+  response: AgentResponse;
+  timestamp: string;
+}) {
   return (
     <>
-      <MarkdownAnswer answer={response.answer} />
-
-      <details className="trace-details">
-        <summary><Network size={16} />分析轨迹<ChevronDown size={16} /></summary>
-        <ol>
-          {response.steps.map((step) => (
-            <li key={step.stage}><strong>{step.title}</strong><span>{step.detail}</span></li>
-          ))}
-        </ol>
-        <div className="tool-call">
-          <span>调用工具</span><code>{response.tool.name}</code>
-          <pre>{serializedArguments}</pre>
-        </div>
-      </details>
-
       {response.warnings.length > 0 ? (
-        <section className="warnings" aria-label="分析警告">
-          {response.warnings.map((warning) => (
-            <div key={warning.code}><AlertTriangle size={16} /><p><strong>{warning.code}</strong>{warning.message}</p></div>
-          ))}
-        </section>
+        <DisclosureSection
+          className="notes-panel"
+          icon={<Info size={16} />}
+          title="数据说明"
+          meta={`${response.warnings.length} 项`}
+        >
+          <div className="analysis-notes">
+            {response.warnings.map((warning) => (
+              <div key={warning.code}>
+                <strong>{warningTitle(warning.code)}</strong>
+                <span>{warning.message}</span>
+              </div>
+            ))}
+          </div>
+        </DisclosureSection>
       ) : null}
 
-      {response.charts.map((chart) => <AnalysisChart key={`${chart.kind}-${chart.title}`} chart={chart} />)}
+      {response.charts.map((chart) => (
+        <DisclosureSection
+          key={`${chart.kind}-${chart.title}`}
+          className="chart-panel"
+          icon={<MapIcon size={16} />}
+          title="可视化结果"
+          meta={chart.title}
+        >
+          <AnalysisChart chart={chart} />
+        </DisclosureSection>
+      ))}
       <ResultTable result={response.result} />
 
       <footer className="provenance">
+        <time dateTime={timestamp}>{formatDateTime(timestamp)}</time>
         <span>模型 {response.model}</span>
-        <span>来源 {response.sources.length > 0 ? response.sources.join(" · ") : "未声明"}</span>
+        <span className="source-files">
+          数据来源
+          {response.sources.length > 0
+            ? response.sources.map((source) => <code key={source}>{source}</code>)
+            : "未声明"}
+        </span>
+        {response.trace_id ? <Link href={`/traces?trace_id=${response.trace_id}`}>查看链路</Link> : null}
       </footer>
     </>
   );
+}
+
+type DisclosureSectionProps = {
+  className?: string;
+  icon: ReactNode;
+  title: string;
+  meta?: string;
+  children: ReactNode;
+};
+
+function DisclosureSection({ className = "", icon, title, meta, children }: DisclosureSectionProps) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <details
+      className={`response-section ${className}`.trim()}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        {icon}
+        <span>{title}</span>
+        {meta ? <small>{meta}</small> : null}
+        <ChevronDown size={16} />
+      </summary>
+      <div className="section-body">{children}</div>
+    </details>
+  );
+}
+
+function warningTitle(code: string): string {
+  const titles: Record<string, string> = {
+    missing_filter_values_excluded: "缺失值处理",
+    missing_environment_values_excluded: "缺失值处理",
+    missing_group_values_excluded: "缺失值处理",
+    samples_missing_marker_excluded: "样本覆盖范围",
+    read_count_is_not_cell_abundance: "指标解释",
+    unrarefied_diversity: "计算方法",
+    asymptotic_p_value_caution: "统计解释",
+    insufficient_samples: "样本量限制",
+    constant_input: "统计限制",
+    undefined_correlation: "统计限制",
+    taxon_not_found: "匹配结果",
+    zero_reads_in_analysis_set: "零读数处理",
+    zero_read_library: "零读数处理",
+  };
+  return titles[code] ?? "结果解释";
+}
+
+function runsFromSession(session: SessionDetail): Run[] {
+  const assistantsByParent = new Map<string, ChatMessage>();
+  for (const message of session.messages) {
+    if (message.role === "assistant" && message.parent_message_id) {
+      assistantsByParent.set(message.parent_message_id, message);
+    }
+  }
+
+  return session.messages
+    .filter((message) => message.role === "user")
+    .map((userMessage) => {
+      const assistant = assistantsByParent.get(userMessage.id);
+      const failed = assistant?.status === "failed";
+      const response = assistant?.agent_response ?? undefined;
+      return {
+        id: userMessage.trace_id ?? userMessage.id,
+        question: userMessage.content,
+        createdAt: userMessage.created_at,
+        completedAt: assistant?.updated_at,
+        steps: response?.steps ?? [],
+        streamedReasoning: response?.reasoning ?? reasoningFromMessage(assistant),
+        streamedAnswer: response?.answer ?? assistant?.content ?? "",
+        response,
+        error: failed ? errorFromMessage(assistant) : undefined,
+        historical: true,
+        model: stringMetadata(assistant, "model"),
+        sources: stringListMetadata(assistant, "sources"),
+        traceId: userMessage.trace_id ?? undefined,
+      };
+    });
+}
+
+function reasoningFromMessage(message?: ChatMessage): string {
+  if (!message) {
+    return "";
+  }
+  const part = message.content_parts.find((item) => item.type === "reasoning");
+  return part && typeof part.content === "string" ? part.content : "";
+}
+
+function errorFromMessage(message?: ChatMessage): string {
+  const value = message?.metadata.error_message;
+  return typeof value === "string" && value ? value : "本次分析未完成";
+}
+
+function stringMetadata(message: ChatMessage | undefined, key: string): string | undefined {
+  const value = message?.metadata[key];
+  return typeof value === "string" && value ? value : undefined;
+}
+
+function stringListMetadata(message: ChatMessage | undefined, key: string): string[] {
+  const value = message?.metadata[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+}
+
+function failedHistoryRun(sessionId: string, message: string): Run {
+  const now = new Date().toISOString();
+  return {
+    id: `history-error-${sessionId}`,
+    question: "加载历史对话",
+    createdAt: now,
+    completedAt: now,
+    steps: [],
+    streamedReasoning: "",
+    streamedAnswer: "",
+    error: message,
+    historical: true,
+  };
 }
 
 function applyEvent(run: Run, event: AgentStreamEvent): Run {
@@ -430,24 +696,34 @@ function applyEvent(run: Run, event: AgentStreamEvent): Run {
       steps: event.response.steps,
       streamedReasoning: event.response.reasoning,
       streamedAnswer: event.response.answer,
+      completedAt: new Date().toISOString(),
     };
   }
   if (event.event === "error") {
-    return { ...run, error: event.error ?? "分析失败" };
+    return {
+      ...run,
+      error: event.error ?? "分析失败",
+      completedAt: new Date().toISOString(),
+    };
   }
   return run;
 }
 
 async function streamQuestion(
   question: string,
+  sessionId: string | undefined,
   onEvent: (event: AgentStreamEvent) => void,
 ) {
   const response = await fetch(`${apiBaseUrl}/api/v1/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify({ question }),
+    credentials: "include",
+    body: JSON.stringify({ question, session_id: sessionId }),
   });
   if (!response.ok || !response.body) {
+    if (response.status === 401) {
+      window.dispatchEvent(new Event("tara-auth-expired"));
+    }
     const payload = await response.json().catch(() => null) as { detail?: string } | null;
     throw new Error(payload?.detail ?? `请求失败（HTTP ${response.status}）`);
   }

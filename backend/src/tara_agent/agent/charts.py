@@ -1,4 +1,4 @@
-"""Deterministic chart projections from structured tool results."""
+"""根据结构化工具结果确定性地生成图表数据。"""
 
 from __future__ import annotations
 

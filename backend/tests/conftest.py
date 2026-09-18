@@ -27,7 +27,7 @@ def valid_dataset_dir(tmp_path: Path) -> Iterator[Path]:
 
 @pytest.fixture
 def preprocessable_dataset_dir(tmp_path: Path) -> Path:
-    """Create a tiny but semantically valid four-file Tara source set."""
+    """创建规模很小但语义有效的四文件 Tara 原始数据集。"""
 
     dataset_dir = tmp_path / "source"
     dataset_dir.mkdir()

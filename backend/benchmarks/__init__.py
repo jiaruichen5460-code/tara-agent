@@ -1,1 +1,1 @@
-"""Development-only performance benchmarks."""
+"""仅用于开发阶段的性能基准测试。"""

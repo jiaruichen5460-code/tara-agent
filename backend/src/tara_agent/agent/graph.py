@@ -1,4 +1,4 @@
-"""Minimal, fixed-path LangGraph workflow for Tara questions."""
+"""用于 Tara 问题的最小化固定流程 LangGraph 工作流。"""
 
 from __future__ import annotations
 
@@ -15,10 +15,12 @@ from tara_agent.agent.models import (
     AgentStep,
     AgentStreamEvent,
     ChartSpec,
+    ModelUsage,
     ToolPlan,
     ToolTrace,
 )
 from tara_agent.agent.provider import AgentModel
+from tara_agent.data.catalog import source_filename
 from tara_agent.domain.contracts import ResultWarning
 
 
@@ -30,10 +32,11 @@ class AgentState(TypedDict, total=False):
     answer: str
     charts: list[ChartSpec]
     steps: list[AgentStep]
+    answer_usage: ModelUsage
 
 
 class TaraAgent:
-    """Run one planned MCP call through a traceable fixed workflow."""
+    """通过可追踪的固定工作流执行一次预定的 MCP 调用。"""
 
     def __init__(self, model: AgentModel, gateway: MCPToolGateway) -> None:
         self.model = model
@@ -111,11 +114,15 @@ class TaraAgent:
 
         reasoning_parts = []
         answer_parts = []
+        answer_usage = None
         async for delta in self.model.stream_answer(
             state["question"],
             state["plan"],
             state["result"],
         ):
+            if delta.kind == "usage":
+                answer_usage = delta.usage
+                continue
             if delta.kind == "reasoning":
                 reasoning_parts.append(delta.content)
                 event = AgentStreamEvent(event="reasoning_delta", delta=delta.content)
@@ -131,6 +138,7 @@ class TaraAgent:
             "reasoning": reasoning,
             "answer": answer,
             "charts": charts,
+            "answer_usage": answer_usage,
             "steps": [*state.get("steps", []), step],
         }
 
@@ -151,10 +159,15 @@ class TaraAgent:
                 name=plan.tool_name,
                 arguments=plan.arguments,
                 summary=plan.rationale,
+                usage=plan.usage,
             ),
             steps=state["steps"],
             result=result,
             charts=state.get("charts", []),
             warnings=warnings,
-            sources=[str(item) for item in provenance.get("source_datasets", [])],
+            sources=[
+                source_filename(str(item))
+                for item in provenance.get("source_datasets", [])
+            ],
+            answer_usage=state.get("answer_usage"),
         )

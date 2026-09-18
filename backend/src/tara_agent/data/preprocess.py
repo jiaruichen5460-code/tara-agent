@@ -1,4 +1,4 @@
-"""Deterministic validation and preprocessing for the four Tara MVP datasets."""
+"""四份 Tara MVP 数据集的确定性校验与预处理。"""
 
 from __future__ import annotations
 
@@ -94,12 +94,12 @@ EXPECTED_MARKER_ROWS = {"v4": 152_155, "v9": 181_388}
 
 
 class PreprocessingError(RuntimeError):
-    """Raised when source data violates a deterministic preprocessing contract."""
+    """源数据违反确定性预处理约束时抛出。"""
 
 
 @dataclass(frozen=True, slots=True)
 class PreprocessResult:
-    """Outcome of a preprocessing request."""
+    """一次预处理请求的结果。"""
 
     status: str
     manifest_path: Path
@@ -113,7 +113,7 @@ def preprocess(
     force: bool = False,
     enforce_expected_shape: bool = True,
 ) -> PreprocessResult:
-    """Validate source TSVs and publish one complete processed-data generation."""
+    """校验原始 TSV，并发布一份完整的处理后数据。"""
 
     started = perf_counter()
     source_dir = source_dir.resolve(strict=True)
@@ -451,7 +451,7 @@ def _compute_abundance_checks(
     *,
     columns_per_batch: int = 64,
 ) -> dict[str, int]:
-    """Recompute row totals in projected column blocks to cap peak memory."""
+    """分批选取列并重新计算各行总数，以限制内存峰值。"""
 
     expected_amplicons = metadata.get_column("amplicon")
     totals: pl.Series | None = None

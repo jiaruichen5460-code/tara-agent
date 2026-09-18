@@ -1,4 +1,4 @@
-"""Transport-independent contracts for deterministic Tara queries."""
+"""用于确定性 Tara 查询且与传输方式无关的数据契约。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from tara_agent.domain.contracts import Marker, ResultMetadata
 
 
 class Page(BaseModel):
-    """Pagination facts returned with bounded query results."""
+    """随受限查询结果返回的分页信息。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -21,7 +21,7 @@ class Page(BaseModel):
 
 
 class SamplingDepth(StrEnum):
-    """Canonical depth labels present in the Tara sample context."""
+    """Tara 样本背景信息中的规范深度标签。"""
 
     DCM = "DCM"
     FSW = "FSW"
@@ -40,7 +40,7 @@ _DEPTH_ALIASES = {
 
 
 class FindSamplesQuery(BaseModel):
-    """Supported sample filters for the MVP."""
+    """MVP 支持的样本筛选条件。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -49,8 +49,8 @@ class FindSamplesQuery(BaseModel):
     depths: list[SamplingDepth] = Field(
         default_factory=list,
         description=(
-            "Canonical Tara depth codes. SRF is the surface layer; 表层 and surface "
-            "are accepted aliases for SRF."
+            "Tara 规范深度代码。SRF 表示表层，同时接受“表层”和 surface 作为 "
+            "SRF 的别名。"
         ),
     )
     size_fractions: list[str] = Field(default_factory=list)
@@ -109,7 +109,7 @@ class FindSamplesQuery(BaseModel):
 
 
 class SampleSummary(BaseModel):
-    """Compact sample fields used in search results."""
+    """搜索结果使用的精简样本字段。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -126,7 +126,7 @@ class SampleSummary(BaseModel):
 
 
 class SampleContext(BaseModel):
-    """Complete validated general and environmental context for one sample."""
+    """单个样本完整且已校验的基本与环境背景信息。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -187,14 +187,14 @@ class SampleInfoResult(BaseModel):
 
 
 class TaxonMatchMode(StrEnum):
-    """Explicit taxonomy matching semantics."""
+    """明确的分类学匹配规则。"""
 
     LEVEL = "level"
     CONTAINS = "contains"
 
 
 class FindTaxaQuery(BaseModel):
-    """A bounded ASV search plus aggregated sample occurrences."""
+    """受限的 ASV 查询及汇总后的样本出现情况。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -216,7 +216,7 @@ class FindTaxaQuery(BaseModel):
 
 
 class TaxonRecord(BaseModel):
-    """One matching ASV and its source-provided classification metadata."""
+    """一个匹配的 ASV 及源数据提供的分类元数据。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -229,7 +229,7 @@ class TaxonRecord(BaseModel):
 
 
 class SampleOccurrence(BaseModel):
-    """Raw reads contributed by all matching ASVs in one marker sample."""
+    """一个标记下的单个样本中，所有匹配 ASV 对应的原始测序读数。"""
 
     model_config = ConfigDict(extra="forbid")
 

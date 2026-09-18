@@ -7,7 +7,7 @@ import polars as pl
 import pytest
 
 from tara_agent.data.preprocess import PreprocessingError, preprocess
-from tara_agent.data.store import ProcessedDataError, ProcessedDataStore
+from tara_agent.data.reader import ProcessedDataError, ProcessedDataReader
 from tara_agent.domain.contracts import Marker
 
 
@@ -61,7 +61,7 @@ def test_preprocess_is_read_only_repeatable_and_accessible(
     assert not (processed_dir / forced.manifest.generation / "benchmark.json").exists()
     assert not list(processed_dir.glob(".staging-*"))
 
-    store = ProcessedDataStore(processed_dir)
+    store = ProcessedDataReader(processed_dir)
     context = store.load_sample_context(["TARA_TEST_001"])
     marker = store.load_marker_data(Marker.V4, sample_ids=["TARA_TEST_002"])
 
@@ -99,7 +99,7 @@ def test_store_rejects_unknown_sample(
         processed_dir,
         enforce_expected_shape=False,
     )
-    store = ProcessedDataStore(processed_dir)
+    store = ProcessedDataReader(processed_dir)
 
     with pytest.raises(ProcessedDataError, match="Unknown sample IDs"):
         store.scan_abundance(Marker.V9, ["TARA_UNKNOWN"])

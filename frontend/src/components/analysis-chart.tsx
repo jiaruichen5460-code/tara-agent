@@ -46,6 +46,8 @@ export function AnalysisChart({ chart }: AnalysisChartProps) {
 const chartConfig: Partial<Config> = {
   displaylogo: false,
   responsive: true,
+  showSendToCloud: false,
+  topojsonURL: "/plotly-topojson/",
   modeBarButtonsToRemove: ["lasso2d", "select2d"],
 };
 
@@ -127,7 +129,8 @@ function chartLayout(chart: ChartSpec, theme: ChartTheme): Partial<Layout> {
       ...shared,
       margin: { l: 16, r: 16, t: 52, b: 16 },
       geo: {
-        projection: { type: "natural earth" },
+        fitbounds: false,
+        projection: { type: "natural earth", scale: 1 },
         showland: true,
         landcolor: theme.land,
         showocean: true,

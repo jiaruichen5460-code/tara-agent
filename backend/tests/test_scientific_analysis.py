@@ -13,7 +13,7 @@ from tara_agent.analysis import (
 )
 from tara_agent.data.catalog import DATASET_SPECS, DatasetKind
 from tara_agent.data.preprocess import preprocess
-from tara_agent.data.store import ProcessedDataStore
+from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.domain.contracts import Marker
 
 
@@ -36,7 +36,7 @@ def scientific_service(
         processed_dir,
         enforce_expected_shape=False,
     )
-    return TaraScientificService(ProcessedDataStore(processed_dir))
+    return TaraScientificService(ProcessedDataReader(processed_dir))
 
 
 def test_taxon_abundance_returns_raw_and_within_sample_relative_values(

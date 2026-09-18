@@ -13,7 +13,7 @@ from tara_agent.analysis import (
     TaxonMatchMode,
 )
 from tara_agent.data.preprocess import preprocess
-from tara_agent.data.store import ProcessedDataStore
+from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.domain.contracts import Marker
 
 
@@ -25,7 +25,7 @@ def query_service(preprocessable_dataset_dir: Path, tmp_path: Path) -> TaraQuery
         processed_dir,
         enforce_expected_shape=False,
     )
-    return TaraQueryService(ProcessedDataStore(processed_dir))
+    return TaraQueryService(ProcessedDataReader(processed_dir))
 
 
 def test_find_samples_combines_filters_and_returns_stable_page(
@@ -58,7 +58,7 @@ def test_find_samples_warning_counts_missing_temperature_after_other_filters(
     query_service: TaraQueryService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    context = query_service.store.load_sample_context().with_columns(
+    context = query_service.reader.load_sample_context().with_columns(
         pl.when(pl.col("sample_id_pangaea") == "TARA_TEST_001")
         .then(pl.lit("Target Ocean"))
         .otherwise(pl.lit("Other Ocean"))
@@ -66,7 +66,7 @@ def test_find_samples_warning_counts_missing_temperature_after_other_filters(
         pl.lit(None, dtype=pl.Float64).alias("temperature"),
     )
     monkeypatch.setattr(
-        query_service.store,
+        query_service.reader,
         "load_sample_context",
         lambda: context,
     )

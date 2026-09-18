@@ -2,7 +2,20 @@ from pathlib import Path
 
 import pytest
 
-from tara_agent.data.catalog import DATASET_SPECS, DatasetCatalog
+from tara_agent.data.catalog import DATASET_SPECS, DatasetCatalog, source_filename
+
+
+@pytest.mark.parametrize(
+    ("source_key", "filename"),
+    [
+        ("context_general", "context_general.tsv"),
+        ("context_stat", "context_stat.tsv"),
+        ("18s_v4", "TARA-Oceans_18S-V4_dada2_table.tsv"),
+        ("18s_v9", "TARA-Oceans_18S-V9_dada2_table.tsv"),
+    ],
+)
+def test_source_keys_map_to_original_filenames(source_key: str, filename: str) -> None:
+    assert source_filename(source_key) == filename
 
 
 def test_catalog_accepts_the_expected_dataset_contract(valid_dataset_dir: Path) -> None:

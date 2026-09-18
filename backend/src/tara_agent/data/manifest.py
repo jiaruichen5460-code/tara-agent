@@ -1,4 +1,4 @@
-"""Versioned contracts for processed Tara data."""
+"""处理后 Tara 数据的版本化契约。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class SourceFileRecord(BaseModel):
-    """Identity and observed shape of one immutable source file."""
+    """一个不可修改源文件的标识及实际数据规模。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -22,7 +22,7 @@ class SourceFileRecord(BaseModel):
 
 
 class ArtifactRecord(BaseModel):
-    """Integrity, shape, and logical schema of a generated artifact."""
+    """生成产物的完整性、规模和逻辑结构。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -37,7 +37,7 @@ class ArtifactRecord(BaseModel):
 
 
 class CoverageRecord(BaseModel):
-    """Sample relationships across context, V4, and V9."""
+    """背景数据、V4 和 V9 之间的样本关系。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -55,7 +55,7 @@ class CoverageRecord(BaseModel):
 
 
 class ProcessingMetrics(BaseModel):
-    """Resource observations from one completed preprocessing run."""
+    """一次已完成预处理运行的资源使用记录。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -66,7 +66,7 @@ class ProcessingMetrics(BaseModel):
 
 
 class DataManifest(BaseModel):
-    """Pointer from a stable manifest to one complete data generation."""
+    """从稳定清单指向一次完整数据生成结果的引用。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -87,12 +87,12 @@ class DataManifest(BaseModel):
 
     @classmethod
     def load(cls, path: Path) -> DataManifest:
-        """Load and validate a manifest from disk."""
+        """从磁盘加载并校验数据清单。"""
 
         return cls.model_validate_json(path.read_text(encoding="utf-8"))
 
     def write(self, path: Path) -> None:
-        """Write stable, human-readable JSON. Atomic replacement is handled by the caller."""
+        """写入稳定、便于阅读的 JSON；原子替换由调用方处理。"""
 
         payload = self.model_dump(mode="json", exclude_none=True)
         path.write_text(

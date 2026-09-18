@@ -1,10 +1,14 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { ChevronDown, Database } from "lucide-react";
+import { type ReactNode, useState } from "react";
 
 type ResultTableProps = {
   result: Record<string, unknown>;
 };
 
 export function ResultTable({ result }: ResultTableProps) {
+  const [open, setOpen] = useState(true);
   const rows = findRows(result);
   if (rows.length === 0) {
     return null;
@@ -12,32 +16,40 @@ export function ResultTable({ result }: ResultTableProps) {
   const columns = Object.keys(rows[0]).slice(0, 8);
 
   return (
-    <div className="table-section">
-      <div className="section-heading">
-        <h3>结构化结果</h3>
-        <span>当前返回 {rows.length} 行</span>
-      </div>
-      <div className="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              {columns.map((column) => (
-                <th key={column}>{humanize(column)}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => (
-              <tr key={rowKey(row, index)}>
+    <details
+      className="response-section result-panel"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <Database size={16} />
+        <span>结构化结果</span>
+        <small>当前返回 {rows.length} 行</small>
+        <ChevronDown size={16} />
+      </summary>
+      <div className="section-body">
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
                 {columns.map((column) => (
-                  <td key={column}>{formatValue(row[column])}</td>
+                  <th key={column}>{humanize(column)}</th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={rowKey(row, index)}>
+                  {columns.map((column) => (
+                    <td key={column}>{formatValue(row[column])}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </details>
   );
 }
 

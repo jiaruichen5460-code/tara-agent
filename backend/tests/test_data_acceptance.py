@@ -17,7 +17,7 @@ from tara_agent.analysis import (
 )
 from tara_agent.data.catalog import DATASET_SPECS
 from tara_agent.data.preprocess import preprocess
-from tara_agent.data.store import ProcessedDataStore
+from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.domain.contracts import Marker
 
 
@@ -65,7 +65,7 @@ def test_full_dataset_preprocessing_acceptance(tmp_path: Path) -> None:
     } == {key: artifact.sha256 for key, artifact in forced.manifest.artifacts.items()}
     assert not list(processed_dir.glob(".staging-*"))
 
-    store = ProcessedDataStore(processed_dir)
+    store = ProcessedDataReader(processed_dir)
     assert store.load_sample_context().height == 1_434
     assert len(store.marker_sample_ids(Marker.V4)) == 1_011
     assert len(store.marker_sample_ids(Marker.V9)) == 1_069

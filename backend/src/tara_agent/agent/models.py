@@ -1,10 +1,11 @@
-"""Validated contracts for planning, traces, charts, and chat responses."""
+"""用于规划、调用轨迹、图表和聊天回复的已校验数据契约。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -28,22 +29,36 @@ class ToolDefinition(BaseModel):
     input_schema: dict[str, Any]
 
 
+class ModelUsage(BaseModel):
+    """模型服务商返回的实际 Token 用量。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
+    cached_tokens: int | None = Field(default=None, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
+
+
 class ToolPlan(BaseModel):
-    """One bounded MCP tool call selected by the model."""
+    """模型选定的一次受限 MCP 工具调用。"""
 
     model_config = ConfigDict(extra="forbid")
 
     tool_name: ToolName
     arguments: dict[str, Any]
     rationale: str = Field(min_length=1, max_length=300)
+    usage: ModelUsage | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ModelStreamDelta:
-    """One provider-independent reasoning or answer text delta."""
+    """一段与模型服务商无关的思考或答案文本增量。"""
 
-    kind: Literal["reasoning", "answer"]
-    content: str
+    kind: Literal["reasoning", "answer", "usage"]
+    content: str = ""
+    usage: ModelUsage | None = None
 
 
 class AgentStep(BaseModel):
@@ -61,7 +76,7 @@ class ChartKind(StrEnum):
 
 
 class ChartSpec(BaseModel):
-    """Small transport-neutral chart contract rendered by the frontend."""
+    """由前端渲染的简洁且与传输方式无关的图表数据契约。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -80,6 +95,7 @@ class ToolTrace(BaseModel):
     name: ToolName
     arguments: dict[str, Any]
     summary: str
+    usage: ModelUsage | None = None
 
 
 class AgentResponse(BaseModel):
@@ -95,22 +111,36 @@ class AgentResponse(BaseModel):
     charts: list[ChartSpec]
     warnings: list[ResultWarning]
     sources: list[str]
+    answer_usage: ModelUsage | None = None
+    session_id: UUID | None = None
+    trace_id: UUID | None = None
+    message_id: UUID | None = None
 
 
 class AgentStreamEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    event: Literal["step", "reasoning_delta", "answer_delta", "complete", "error"]
+    event: Literal[
+        "run_started",
+        "step",
+        "reasoning_delta",
+        "answer_delta",
+        "complete",
+        "error",
+    ]
     step: AgentStep | None = None
     delta: str | None = None
     response: AgentResponse | None = None
     error: str | None = None
+    session_id: UUID | None = None
+    trace_id: UUID | None = None
 
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(min_length=1, max_length=2_000)
+    session_id: UUID | None = None
 
     @field_validator("question")
     @classmethod

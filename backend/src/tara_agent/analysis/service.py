@@ -1,4 +1,4 @@
-"""Clear deterministic implementations of the Tara MVP query capabilities."""
+"""Tara MVP 查询能力的清晰、确定性实现。"""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from tara_agent.analysis.models import (
     TaxonRecord,
 )
 from tara_agent.analysis.taxonomy import taxonomy_predicate
-from tara_agent.data.store import ProcessedDataStore
+from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.domain.contracts import DataProvenance, ResultMetadata, ResultWarning
 
 SAMPLE_SUMMARY_COLUMNS = (
@@ -39,17 +39,17 @@ ABUNDANCE_COLUMNS_PER_BATCH = 64
 
 
 class AnalysisNotFoundError(LookupError):
-    """Raised when a requested Tara entity does not exist."""
+    """请求的 Tara 数据实体不存在时抛出。"""
 
 
 class TaraQueryService:
-    """Query validated data without depending on API, MCP, or Agent transports."""
+    """查询已校验的数据，不依赖 API、MCP 或 Agent 传输层。"""
 
-    def __init__(self, store: ProcessedDataStore) -> None:
-        self.store = store
+    def __init__(self, reader: ProcessedDataReader) -> None:
+        self.reader = reader
 
     def find_samples(self, query: FindSamplesQuery) -> FindSamplesResult:
-        context = self.store.load_sample_context()
+        context = self.reader.load_sample_context()
         filtered = self._filter_samples(context, query).sort("sample_id_pangaea")
         total = filtered.height
         page = filtered.slice(query.offset, query.limit)
@@ -79,7 +79,7 @@ class TaraQueryService:
             raise ValueError("sample_id must not be blank")
 
         frame = (
-            self.store.scan_context()
+            self.reader.scan_context()
             .filter(pl.col("sample_id_pangaea") == normalized)
             .collect()
         )
@@ -100,7 +100,7 @@ class TaraQueryService:
 
     def find_taxa(self, query: FindTaxaQuery) -> FindTaxaResult:
         predicate = taxonomy_predicate(query.taxon, query.match_mode)
-        matching = self.store.scan_asv_metadata(query.marker).filter(predicate)
+        matching = self.reader.scan_asv_metadata(query.marker).filter(predicate)
         matching_frame = matching.collect(engine="streaming")
         matching_frame = matching_frame.sort(
             ["total", "amplicon"], descending=[True, False]
@@ -116,7 +116,7 @@ class TaraQueryService:
         sample_occurrences = [
             SampleOccurrence.model_validate(row) for row in occurrence_page.to_dicts()
         ]
-        marker_sample_count = len(self.store.marker_sample_ids(query.marker))
+        marker_sample_count = len(self.reader.marker_sample_ids(query.marker))
 
         return FindTaxaResult(
             marker=query.marker,
@@ -149,8 +149,7 @@ class TaraQueryService:
                     ResultWarning(
                         code="read_count_is_not_cell_abundance",
                         message=(
-                            "Read counts are sequencing observations and must not be "
-                            "interpreted as cell abundance."
+                            "测序读数是测序观测信号，不能直接解释为细胞丰度。"
                         ),
                     )
                 ],
@@ -170,7 +169,7 @@ class TaraQueryService:
     def _filter_samples_by_context(
         context: pl.DataFrame, query: FindSamplesQuery
     ) -> pl.DataFrame:
-        """Apply filters that do not depend on the temperature value."""
+        """应用不依赖温度值的筛选条件。"""
 
         filtered = context
         if query.ocean_region_contains is not None:
@@ -202,8 +201,7 @@ class TaraQueryService:
             ResultWarning(
                 code="missing_filter_values_excluded",
                 message=(
-                    "Samples with missing temperature were excluded after applying "
-                    "the other sample filters."
+                    "应用其他样本筛选条件后，温度值缺失的样本未参与温度筛选。"
                 ),
                 details={
                     "field": "temperature",
@@ -231,13 +229,13 @@ class TaraQueryService:
             )
 
         matching_ids = matching_metadata.select("amplicon").lazy()
-        samples = self.store.marker_sample_ids(query.marker)
+        samples = self.reader.marker_sample_ids(query.marker)
         occurrence_rows: list[dict[str, int | str]] = []
 
         for start in range(0, len(samples), ABUNDANCE_COLUMNS_PER_BATCH):
             batch = samples[start : start + ABUNDANCE_COLUMNS_PER_BATCH]
             totals = (
-                self.store.scan_abundance(query.marker, batch)
+                self.reader.scan_abundance(query.marker, batch)
                 .join(matching_ids, on="amplicon", how="inner")
                 .select([pl.col(sample).cast(pl.UInt64).sum() for sample in batch])
                 .collect(engine="streaming")

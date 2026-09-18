@@ -1,4 +1,4 @@
-# Tara-Agent backend
+# Tara Agent backend
 
 The backend keeps HTTP transport, deterministic data access, and domain contracts separate.
 Source TSV files are immutable inputs; runtime code reads only validated Parquet artifacts.
@@ -10,8 +10,27 @@ src/tara_agent/
 ├── data/         source validation, preprocessing, manifest, and processed-data access
 ├── domain/       transport-independent shared contracts
 ├── mcp/          thin MCP server and tool adapters
+├── persistence/  PostgreSQL engine and SQLAlchemy persistence models
 └── config.py     environment-backed configuration
 ```
+
+## Database
+
+PostgreSQL stores chat sessions, messages, request traces, and nested trace spans. Start the
+database from the repository root, then apply versioned migrations from this directory:
+
+```powershell
+docker compose up -d postgres
+uv run alembic upgrade head
+```
+
+The application reads `TARA_DATABASE_URL` from the root `.env` and then `backend/.env`; the latter
+takes precedence. Alembic is the only supported way to change shared database structure.
+
+Each chat request atomically creates a user message, an assistant placeholder, and one Agent
+trace. Successful and failed executions both persist ordered spans for planning, deterministic
+tool execution, and answer generation. Streaming text is buffered in memory and committed at the
+end of the run instead of writing every token to PostgreSQL.
 
 ## Preprocess data
 
@@ -102,7 +121,21 @@ answer reasoning effort is `low`. The Agent uses a fixed LangGraph workflow: pla
 execute one whitelisted MCP tool, then organize the answer. The model never receives source file
 access, Python, or SQL execution capabilities.
 
+Browser clients authenticate with an opaque server-side session. Passwords use Argon2 hashes;
+only a SHA-256 hash of each random session token is stored in PostgreSQL. The browser receives an
+HttpOnly, SameSite cookie, with Secure enforced in production. Session and trace queries are
+always scoped to the authenticated owner.
+
+- `POST /api/v1/auth/register`: create an account and login session.
+- `POST /api/v1/auth/login`: create a login session.
+- `POST /api/v1/auth/guest`: enter the shared development guest space; disabled in production.
+- `POST /api/v1/auth/logout`: revoke the current login session.
+- `GET /api/v1/auth/me`: return the authenticated user.
 - `POST /api/v1/chat`: complete structured response.
 - `POST /api/v1/chat/stream`: SSE workflow steps, reasoning deltas, and answer deltas followed by
   the complete structured response.
+- `GET /api/v1/sessions`: paginated conversation list.
+- `GET /api/v1/sessions/{session_id}`: one conversation and its ordered messages.
+- `GET /api/v1/traces`: paginated traces, optionally filtered by `session_id`.
+- `GET /api/v1/traces/{trace_id}`: one trace and its ordered workflow spans.
 - `GET /api/v1/health`: dataset, Agent, and model readiness.

@@ -9,9 +9,15 @@ from pydantic import ValidationError
 from tara_agent.agent import AgentModel
 from tara_agent.agent.gateway import MCPToolGateway
 from tara_agent.agent.graph import TaraAgent
-from tara_agent.agent.models import ModelStreamDelta, ToolDefinition, ToolName, ToolPlan
+from tara_agent.agent.models import (
+    ModelStreamDelta,
+    ModelUsage,
+    ToolDefinition,
+    ToolName,
+    ToolPlan,
+)
 from tara_agent.data.preprocess import preprocess
-from tara_agent.data.store import ProcessedDataStore
+from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.mcp import create_server
 
 
@@ -63,7 +69,15 @@ class RepresentativeModel(AgentModel):
         tools: list[ToolDefinition],
     ) -> ToolPlan:
         assert {tool.name for tool in tools} == set(ToolName)
-        return self.plans[question]
+        return self.plans[question].model_copy(
+            update={
+                "usage": ModelUsage(
+                    input_tokens=100,
+                    output_tokens=20,
+                    total_tokens=120,
+                )
+            }
+        )
 
     async def stream_answer(
         self,
@@ -77,6 +91,15 @@ class RepresentativeModel(AgentModel):
         yield ModelStreamDelta(kind="reasoning", content="先检查工具结果。")
         yield ModelStreamDelta(kind="answer", content=answer[:midpoint])
         yield ModelStreamDelta(kind="answer", content=answer[midpoint:])
+        yield ModelStreamDelta(
+            kind="usage",
+            usage=ModelUsage(
+                input_tokens=200,
+                output_tokens=40,
+                total_tokens=240,
+                reasoning_tokens=10,
+            ),
+        )
 
 
 @pytest.fixture
@@ -96,7 +119,7 @@ def tara_agent(
         processed_dir,
         enforce_expected_shape=False,
     )
-    server = create_server(ProcessedDataStore(processed_dir))
+    server = create_server(ProcessedDataReader(processed_dir))
     return TaraAgent(representative_model, MCPToolGateway(server))
 
 
