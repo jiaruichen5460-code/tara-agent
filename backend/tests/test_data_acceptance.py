@@ -11,8 +11,8 @@ from tara_agent.analysis import (
     EnvironmentVariable,
     FindSamplesQuery,
     FindTaxaQuery,
+    TaraComputeService,
     TaraQueryService,
-    TaraScientificService,
     TaxonAbundanceQuery,
 )
 from tara_agent.data.catalog import DATASET_SPECS
@@ -99,9 +99,9 @@ def test_full_dataset_preprocessing_acceptance(tmp_path: Path) -> None:
     assert taxa.sample_page.total > 0
     assert all("Bacillariophyta" in item.taxonomy.split(";") for item in taxa.asvs)
 
-    scientific = TaraScientificService(store)
+    compute = TaraComputeService(store)
     marker_samples = store.marker_sample_ids(Marker.V4)[:100]
-    abundance = scientific.taxon_abundance(
+    abundance = compute.taxon_abundance(
         TaxonAbundanceQuery(
             marker=Marker.V4,
             taxon="Bacillariophyta",
@@ -115,7 +115,7 @@ def test_full_dataset_preprocessing_acceptance(tmp_path: Path) -> None:
         for item in abundance.observations
     )
 
-    diversity = scientific.diversity_analysis(
+    diversity = compute.diversity_analysis(
         DiversityQuery(
             marker=Marker.V4,
             taxon="Bacillariophyta",
@@ -126,7 +126,7 @@ def test_full_dataset_preprocessing_acceptance(tmp_path: Path) -> None:
     assert all(item.observed_asv_richness > 0 for item in diversity.observations)
     assert all(item.shannon_index is not None for item in diversity.observations)
 
-    association = scientific.environment_association(
+    association = compute.environment_association(
         EnvironmentAssociationQuery(
             marker=Marker.V4,
             taxon="Bacillariophyta",
@@ -142,7 +142,7 @@ def test_full_dataset_preprocessing_acceptance(tmp_path: Path) -> None:
         warning.code for warning in association.metadata.warnings
     }
 
-    all_zero = scientific.environment_association(
+    all_zero = compute.environment_association(
         EnvironmentAssociationQuery(
             marker=Marker.V4,
             taxon="NotATaxon",

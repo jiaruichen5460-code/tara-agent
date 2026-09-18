@@ -1,18 +1,18 @@
-"""确定性的 Tara 查询与分析服务。"""
+"""确定性的 Tara 查询与计算服务。"""
 
-from tara_agent.analysis.models import (
-    FindSamplesQuery,
-    FindTaxaQuery,
-    SamplingDepth,
-    TaxonMatchMode,
-)
-from tara_agent.analysis.scientific import TaraScientificService
-from tara_agent.analysis.scientific_models import (
+from tara_agent.analysis.compute import TaraComputeService
+from tara_agent.analysis.compute_models import (
     DiversityGroup,
     DiversityQuery,
     EnvironmentAssociationQuery,
     EnvironmentVariable,
     TaxonAbundanceQuery,
+)
+from tara_agent.analysis.models import (
+    FindSamplesQuery,
+    FindTaxaQuery,
+    SamplingDepth,
+    TaxonMatchMode,
 )
 from tara_agent.analysis.service import AnalysisNotFoundError, TaraQueryService
 
@@ -25,8 +25,8 @@ __all__ = [
     "FindSamplesQuery",
     "FindTaxaQuery",
     "SamplingDepth",
+    "TaraComputeService",
     "TaraQueryService",
-    "TaraScientificService",
     "TaxonAbundanceQuery",
     "TaxonMatchMode",
 ]

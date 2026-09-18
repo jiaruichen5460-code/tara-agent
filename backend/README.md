@@ -88,7 +88,7 @@ Taxonomy matching defaults to an exact, case-insensitive classification level. L
 matching must be requested explicitly. Results are bounded by pagination and include provenance,
 filter facts, and warnings that sequencing read counts are not cell abundance.
 
-`TaraScientificService` adds the MVP scientific calculations:
+`TaraComputeService` provides the current deterministic calculations:
 
 - `taxon_abundance`: raw reads and within-sample relative abundance for one marker and taxon.
 - `diversity_analysis`: observed ASV richness and natural-log Shannon index, optionally restricted

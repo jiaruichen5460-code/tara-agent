@@ -2,7 +2,7 @@
 
 from mcp.server import MCPServer
 
-from tara_agent.analysis import TaraQueryService, TaraScientificService
+from tara_agent.analysis import TaraComputeService, TaraQueryService
 from tara_agent.config import get_settings
 from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.mcp.tools import register_tools
@@ -27,7 +27,7 @@ def create_server(reader: ProcessedDataReader | None = None) -> MCPServer:
     register_tools(
         server,
         query_service=TaraQueryService(reader),
-        scientific_service=TaraScientificService(reader),
+        compute_service=TaraComputeService(reader),
     )
     return server
 

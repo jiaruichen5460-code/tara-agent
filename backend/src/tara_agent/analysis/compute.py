@@ -1,4 +1,4 @@
-"""MVP 中确定性的丰度、多样性和环境关联分析。"""
+"""Tara 数据的确定性丰度、多样性和环境关联计算。"""
 
 from __future__ import annotations
 
@@ -11,8 +11,7 @@ import numpy as np
 import polars as pl
 from scipy.stats import entropy, spearmanr
 
-from tara_agent.analysis.models import Page
-from tara_agent.analysis.scientific_models import (
+from tara_agent.analysis.compute_models import (
     DiversityGroupSummary,
     DiversityObservation,
     DiversityQuery,
@@ -25,6 +24,7 @@ from tara_agent.analysis.scientific_models import (
     TaxonAbundanceResult,
     TaxonSelection,
 )
+from tara_agent.analysis.models import Page
 from tara_agent.analysis.taxonomy import taxonomy_predicate
 from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.domain.contracts import DataProvenance, Marker, ResultMetadata, ResultWarning
@@ -48,7 +48,7 @@ class _AbundanceCalculation:
     zero_library_samples: list[str]
 
 
-class TaraScientificService:
+class TaraComputeService:
     """基于已校验的标记丰度矩阵执行限定范围的科学计算。"""
 
     def __init__(self, reader: ProcessedDataReader) -> None:

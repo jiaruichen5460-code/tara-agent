@@ -144,11 +144,19 @@ async def test_auth_cookie_and_user_data_isolation() -> None:
             assert other_sessions.json()["page"]["total"] == 0
             hidden_session = await second_client.get(f"/api/v1/sessions/{session_id}")
             assert hidden_session.status_code == 404
+            hidden_session_traces = await second_client.get(
+                f"/api/v1/sessions/{session_id}/traces"
+            )
+            assert hidden_session_traces.status_code == 404
             other_traces = await second_client.get("/api/v1/traces")
             assert other_traces.status_code == 200
             assert other_traces.json()["page"]["total"] == 0
             hidden_trace = await second_client.get(f"/api/v1/traces/{trace_id}")
             assert hidden_trace.status_code == 404
+            hidden_session_trace = await second_client.get(
+                f"/api/v1/sessions/{session_id}/traces/{trace_id}"
+            )
+            assert hidden_session_trace.status_code == 404
     finally:
         async with database.session() as session:
             await session.execute(delete(User).where(User.id.in_(created_user_ids)))

@@ -8,11 +8,11 @@ from typing import Any, Protocol
 
 from openai import AsyncOpenAI, OpenAIError
 
+from tara_agent.agent.context import build_answer_model_input
 from tara_agent.agent.models import (
     ModelStreamDelta,
     ModelUsage,
     ToolDefinition,
-    ToolName,
     ToolPlan,
 )
 from tara_agent.config import Settings
@@ -55,16 +55,6 @@ ANSWER_SYSTEM_PROMPT = """
 的摘要，完整明细由应用直接展示。若摘要中包含分页信息，只需准确说明查询结果总数，
 不要推断或描述当前页实际展示了多少条明细。
 """.strip()
-
-DETAIL_FIELDS_BY_TOOL: dict[ToolName, frozenset[str]] = {
-    ToolName.FIND_SAMPLES: frozenset({"items"}),
-    ToolName.FIND_TAXA: frozenset({"asvs", "sample_occurrences"}),
-    ToolName.TAXON_ABUNDANCE: frozenset({"observations"}),
-    ToolName.DIVERSITY_ANALYSIS: frozenset({"observations"}),
-    ToolName.ENVIRONMENT_ASSOCIATION: frozenset({"points"}),
-}
-PAGINATION_FIELDS = frozenset({"page", "asv_page", "sample_page", "point_page"})
-
 
 class AgentModelError(RuntimeError):
     """语言模型返回无法使用的回复时抛出。"""
@@ -178,13 +168,8 @@ class DeepSeekChatModel:
         plan: ToolPlan,
         result: dict[str, Any],
     ) -> AsyncIterator[ModelStreamDelta]:
-        compact_result = _result_for_model(plan.tool_name, result)
         user_content = json.dumps(
-            {
-                "question": question,
-                "tool_name": plan.tool_name.value,
-                "tool_result": compact_result,
-            },
+            build_answer_model_input(question, plan.tool_name, result),
             ensure_ascii=False,
         )
         try:
@@ -219,33 +204,6 @@ class DeepSeekChatModel:
             raise AgentModelError("DeepSeek answer request failed") from exc
         if not received_content:
             raise AgentModelError("DeepSeek returned an empty answer")
-
-
-def _compact_value(value: Any) -> Any:
-    """限制模型上下文大小，同时不改变结构化 API 结果。"""
-
-    if isinstance(value, dict):
-        return {str(key): _compact_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_compact_value(item) for item in value[:20]]
-    if isinstance(value, str) and len(value) > 300:
-        return f"{value[:300]}..."
-    return value
-
-
-def _result_for_model(tool_name: ToolName, result: dict[str, Any]) -> dict[str, Any]:
-    """移除由界面负责展示的明细记录，仅保留回答所需摘要。"""
-
-    detail_fields = DETAIL_FIELDS_BY_TOOL.get(tool_name, frozenset())
-    return {
-        str(key): (
-            {"total": value.get("total")}
-            if key in PAGINATION_FIELDS and isinstance(value, dict)
-            else _compact_value(value)
-        )
-        for key, value in result.items()
-        if key not in detail_fields
-    }
 
 
 def _schema_for_model(value: Any) -> Any:

@@ -8,11 +8,32 @@ type ResultTableProps = {
 };
 
 export function ResultTable({ result }: ResultTableProps) {
-  const [open, setOpen] = useState(true);
-  const rows = findRows(result);
-  if (rows.length === 0) {
+  const tables = findTables(result);
+  if (tables.length === 0) {
     return null;
   }
+
+  return (
+    <>
+      {tables.map((table) => (
+        <ResultTableSection
+          key={table.key}
+          label={table.label}
+          rows={table.rows}
+        />
+      ))}
+    </>
+  );
+}
+
+type ResultRows = {
+  key: string;
+  label: string;
+  rows: Array<Record<string, unknown>>;
+};
+
+function ResultTableSection({ label, rows }: Omit<ResultRows, "key">) {
+  const [open, setOpen] = useState(true);
   const columns = Object.keys(rows[0]).slice(0, 8);
 
   return (
@@ -24,7 +45,7 @@ export function ResultTable({ result }: ResultTableProps) {
       <summary>
         <Database size={16} />
         <span>结构化结果</span>
-        <small>当前返回 {rows.length} 行</small>
+        <small>{label} {rows.length} 行</small>
         <ChevronDown size={16} />
       </summary>
       <div className="section-body">
@@ -53,14 +74,27 @@ export function ResultTable({ result }: ResultTableProps) {
   );
 }
 
-function findRows(result: Record<string, unknown>): Array<Record<string, unknown>> {
-  for (const key of ["items", "asvs", "observations", "points", "sample_occurrences", "groups"]) {
+const resultLists = [
+  ["items", "样本"],
+  ["asvs", "分类单元"],
+  ["sample_occurrences", "样本出现记录"],
+  ["observations", "观测记录"],
+  ["groups", "分组摘要"],
+  ["points", "关联数据点"],
+] as const;
+
+function findTables(result: Record<string, unknown>): ResultRows[] {
+  const tables: ResultRows[] = [];
+  for (const [key, label] of resultLists) {
     const value = result[key];
-    if (Array.isArray(value) && value.every(isRecord)) {
-      return value;
+    if (Array.isArray(value) && value.length > 0 && value.every(isRecord)) {
+      tables.push({ key, label, rows: value });
     }
   }
-  return isRecord(result.sample) ? [result.sample] : [];
+  if (isRecord(result.sample)) {
+    tables.push({ key: "sample", label: "样本信息", rows: [result.sample] });
+  }
+  return tables;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

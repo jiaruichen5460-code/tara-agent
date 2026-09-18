@@ -155,32 +155,45 @@ async def test_chat_persists_session_messages_and_trace_tree(
             assert messages[3]["agent_response"] == second_payload
 
             traces = await client.get(
-                "/api/v1/traces",
-                params={"session_id": session_id},
+                f"/api/v1/sessions/{session_id}/traces",
             )
             assert traces.status_code == 200
             assert traces.json()["page"]["total"] == 2
 
-            trace = await client.get(f"/api/v1/traces/{first_trace_id}")
+            trace = await client.get(
+                f"/api/v1/sessions/{session_id}/traces/{first_trace_id}"
+            )
             assert trace.status_code == 200
             trace_payload = trace.json()
             assert trace_payload["status"] == "completed"
-            assert [item["sequence_no"] for item in trace_payload["spans"]] == [0, 1, 2]
+            assert [item["sequence_no"] for item in trace_payload["spans"]] == [0, 1, 2, 3]
             assert [item["span_kind"] for item in trace_payload["spans"]] == [
+                "workflow",
                 "llm",
                 "tool",
                 "llm",
             ]
-            assert trace_payload["spans"][1]["tool_name"] == "find_samples"
-            assert trace_payload["spans"][1]["sample_count"] == 2
-            assert trace_payload["spans"][1]["sample_ids"] == ["TARA_TEST_001"]
-            assert trace_payload["spans"][1]["attributes"] == {
+            root_span = trace_payload["spans"][0]
+            assert root_span["parent_span_id"] is None
+            assert all(
+                item["parent_span_id"] == root_span["id"]
+                for item in trace_payload["spans"][1:]
+            )
+            assert trace_payload["spans"][2]["tool_name"] == "find_samples"
+            assert trace_payload["spans"][2]["sample_count"] == 2
+            assert trace_payload["spans"][2]["sample_ids"] == ["TARA_TEST_001"]
+            assert trace_payload["spans"][2]["attributes"] == {
                 "sample_ids_scope": "returned_result"
             }
-            assert trace_payload["spans"][0]["total_tokens"] == 120
-            assert trace_payload["spans"][2]["total_tokens"] == 240
-            assert trace_payload["spans"][2]["context_length"] == 200
-            assert trace_payload["spans"][2]["attributes"] == {
+            assert trace_payload["spans"][1]["total_tokens"] == 120
+            assert trace_payload["spans"][3]["total_tokens"] == 240
+            assert trace_payload["spans"][3]["context_length"] == 200
+            answer_input = trace_payload["spans"][3]["input_data"]
+            assert answer_input["question"] == "找一个 Tara 样本"
+            assert answer_input["tool_name"] == "find_samples"
+            assert "tool_result" in answer_input
+            assert "items" not in answer_input["tool_result"]
+            assert trace_payload["spans"][3]["attributes"] == {
                 "reasoning_tokens": 10
             }
     finally:
@@ -231,19 +244,21 @@ async def test_failed_model_call_is_persisted(
             ]
 
             traces = await client.get(
-                "/api/v1/traces",
-                params={"session_id": session_id},
+                f"/api/v1/sessions/{session_id}/traces",
             )
             trace = traces.json()["items"][0]
             assert trace["status"] == "failed"
             assert trace["question"] == title
             assert trace["error_code"] == "AgentModelError"
 
-            detail = await client.get(f"/api/v1/traces/{trace['id']}")
+            detail = await client.get(
+                f"/api/v1/sessions/{session_id}/traces/{trace['id']}"
+            )
             spans = detail.json()["spans"]
-            assert len(spans) == 1
-            assert spans[0]["status"] == "failed"
-            assert spans[0]["span_kind"] == "llm"
+            assert len(spans) == 2
+            assert [item["status"] for item in spans] == ["failed", "failed"]
+            assert [item["span_kind"] for item in spans] == ["workflow", "llm"]
+            assert spans[1]["parent_span_id"] == spans[0]["id"]
     finally:
         if user_id is not None:
             async with database.session() as session:

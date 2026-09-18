@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Activity,
   Check,
   LoaderCircle,
   LogOut,
@@ -16,7 +15,6 @@ import {
   Waves,
   X,
 } from "lucide-react";
-import Link from "next/link";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { deleteSession, deleteSessions, listSessions, updateSession } from "@/lib/api";
@@ -142,6 +140,14 @@ export function SessionSidebar({
     });
   }
 
+  function toggleAllSessions() {
+    setSelectedIds((current) => (
+      current.size === sessions.length
+        ? new Set()
+        : new Set(sessions.map((session) => session.id))
+    ));
+  }
+
   function requestSelectedSessionsDeletion() {
     const sessionIds = [...selectedIds];
     if (sessionIds.length === 0) {
@@ -261,10 +267,6 @@ export function SessionSidebar({
           <Plus size={16} aria-hidden="true" />
           新建对话
         </button>
-        <Link href="/traces">
-          <Activity size={16} aria-hidden="true" />
-          链路追溯
-        </Link>
       </nav>
 
       <section className="session-history" aria-label="对话记录">
@@ -301,6 +303,21 @@ export function SessionSidebar({
             <MessageSquare size={18} aria-hidden="true" />
             <strong>暂无历史对话</strong>
             <span>完成一次分析后将显示在这里</span>
+          </div>
+        ) : null}
+
+        {managing && sessions.length > 0 ? (
+          <div className="session-selection-toolbar">
+            <button
+              type="button"
+              onClick={toggleAllSessions}
+              disabled={disabled || deleting}
+              aria-pressed={selectedIds.size === sessions.length}
+            >
+              <Check size={13} aria-hidden="true" />
+              {selectedIds.size === sessions.length ? "取消全选" : "全选"}
+            </button>
+            <span>已选 {selectedIds.size} 个</span>
           </div>
         ) : null}
 

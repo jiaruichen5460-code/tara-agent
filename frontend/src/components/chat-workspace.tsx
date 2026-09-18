@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Activity,
   AlertTriangle,
   ArrowUp,
   BrainCircuit,
@@ -73,6 +74,12 @@ export function ChatWorkspace() {
   const [busy, setBusy] = useState(false);
   const followOutput = useRef(true);
   const canSubmit = question.trim().length > 0 && !busy;
+  const latestRun = runs[runs.length - 1];
+  const latestTracedRun = [...runs].reverse().find((run) => run.traceId);
+  const currentTraceHref = sessionId && latestTracedRun?.traceId
+    ? traceHref(sessionId, latestTracedRun.traceId)
+    : undefined;
+  const traceIsRunning = Boolean(busy && latestRun?.traceId === latestTracedRun?.traceId);
 
   useEffect(() => {
     function updateFollowPreference() {
@@ -241,6 +248,17 @@ export function ChatWorkspace() {
             <span className="context-label">Tara Agent</span>
             <h1>海洋数据分析</h1>
           </div>
+          {currentTraceHref ? (
+            <Link
+              className="topbar-trace-link"
+              href={currentTraceHref}
+              target={traceIsRunning ? "_blank" : undefined}
+              rel={traceIsRunning ? "noopener noreferrer" : undefined}
+            >
+              <Activity size={15} aria-hidden="true" />
+              {traceIsRunning ? "查看实时链路" : "查看链路"}
+            </Link>
+          ) : null}
         </header>
 
         <div className="conversation" aria-live="polite">
@@ -400,7 +418,6 @@ function HistoricalMeta({ run }: { run: Run }) {
           {run.sources.map((source) => <code key={source}>{source}</code>)}
         </span>
       ) : null}
-      {run.traceId ? <Link href={`/traces?trace_id=${run.traceId}`}>查看链路</Link> : null}
     </footer>
   );
 }
@@ -553,7 +570,6 @@ function CompletedArtifacts({
             ? response.sources.map((source) => <code key={source}>{source}</code>)
             : "未声明"}
         </span>
-        {response.trace_id ? <Link href={`/traces?trace_id=${response.trace_id}`}>查看链路</Link> : null}
       </footer>
     </>
   );
@@ -680,6 +696,9 @@ function failedHistoryRun(sessionId: string, message: string): Run {
 }
 
 function applyEvent(run: Run, event: AgentStreamEvent): Run {
+  if (event.event === "run_started" && event.trace_id) {
+    return { ...run, traceId: event.trace_id };
+  }
   if (event.event === "step" && event.step) {
     return { ...run, steps: [...run.steps, event.step] };
   }
@@ -707,6 +726,10 @@ function applyEvent(run: Run, event: AgentStreamEvent): Run {
     };
   }
   return run;
+}
+
+function traceHref(sessionId: string, traceId: string): string {
+  return `/sessions/${encodeURIComponent(sessionId)}/traces/${encodeURIComponent(traceId)}`;
 }
 
 async function streamQuestion(

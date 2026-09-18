@@ -38,19 +38,24 @@ class StartedRun:
 
 @dataclass(frozen=True, slots=True)
 class SpanRecord:
-    """一次工作流节点执行结束后需要保存的数据。"""
+    """一个可在执行期间持续更新的 Trace 节点。"""
 
+    id: UUID
+    trace_id: UUID
+    parent_span_id: UUID | None
     sequence_no: int
     name: str
     span_kind: str
-    status: str
     started_at: datetime
-    ended_at: datetime
-    duration_ms: int
+    status: str = "running"
+    ended_at: datetime | None = None
+    duration_ms: int | None = None
+    retry_count: int = 0
     input_data: dict[str, Any] | None = None
     output_data: dict[str, Any] | None = None
     error_code: str | None = None
     error_message: str | None = None
+    error_data: dict[str, Any] | None = None
     model_provider: str | None = None
     model_name: str | None = None
     model_parameters: dict[str, Any] = field(default_factory=dict)
@@ -165,6 +170,35 @@ class AgentRunRepository:
             started_at=now,
         )
 
+    async def create_span(self, record: SpanRecord) -> None:
+        """在节点开始时立即保存运行中的记录。"""
+
+        async with self.database.session() as session:
+            trace_status = await session.scalar(
+                select(AgentTrace.status).where(AgentTrace.id == record.trace_id)
+            )
+            if trace_status is None:
+                raise PersistenceStateError("节点对应的链路不存在")
+            if trace_status != "running":
+                raise PersistenceStateError(f"链路已经结束：{trace_status}")
+            session.add(_span_model(record))
+
+    async def update_span(self, record: SpanRecord) -> None:
+        """更新节点状态和执行结果。"""
+
+        async with self.database.session() as session:
+            span = await session.scalar(
+                select(TraceSpan)
+                .where(
+                    TraceSpan.id == record.id,
+                    TraceSpan.trace_id == record.trace_id,
+                )
+                .with_for_update()
+            )
+            if span is None:
+                raise PersistenceStateError("需要更新的链路节点不存在")
+            _apply_span_record(span, record)
+
     async def complete_run(
         self,
         run: StartedRun,
@@ -174,7 +208,6 @@ class AgentRunRepository:
         answer: str,
         reasoning: str,
         response_data: dict[str, Any],
-        spans: list[SpanRecord],
         markers: list[str],
         sample_count: int | None,
         data_sources: list[dict[str, Any]],
@@ -210,7 +243,6 @@ class AgentRunRepository:
                 "sources": [item.get("filename") for item in data_sources],
             }
             conversation.updated_at = ended_at
-            session.add_all([_span_model(run.trace_id, item) for item in spans])
 
     async def fail_run(
         self,
@@ -220,7 +252,6 @@ class AgentRunRepository:
         duration_ms: int,
         error_code: str,
         error_message: str,
-        spans: list[SpanRecord],
     ) -> None:
         async with self.database.session() as session:
             trace = await session.scalar(
@@ -246,7 +277,6 @@ class AgentRunRepository:
                 "error_message": error_message,
             }
             conversation.updated_at = ended_at
-            session.add_all([_span_model(run.trace_id, item) for item in spans])
 
     async def list_sessions(
         self, *, user_id: str, limit: int, offset: int
@@ -269,6 +299,18 @@ class AgentRunRepository:
                 .limit(limit)
             )
             return list(records), int(total or 0)
+
+    async def session_exists(self, session_id: UUID, *, user_id: str) -> bool:
+        """检查用户是否拥有指定会话，不加载消息正文。"""
+
+        async with self.database.session() as session:
+            owned_session_id = await session.scalar(
+                select(ChatSession.id).where(
+                    ChatSession.id == session_id,
+                    ChatSession.user_id == user_id,
+                )
+            )
+            return owned_session_id is not None
 
     async def get_session(
         self, session_id: UUID, *, user_id: str
@@ -398,13 +440,20 @@ class AgentRunRepository:
             return list(records), int(total or 0)
 
     async def get_trace(
-        self, trace_id: UUID, *, user_id: str
+        self,
+        trace_id: UUID,
+        *,
+        user_id: str,
+        session_id: UUID | None = None,
     ) -> tuple[AgentTrace, list[TraceSpan]]:
+        filters = [AgentTrace.id == trace_id, ChatSession.user_id == user_id]
+        if session_id is not None:
+            filters.append(AgentTrace.session_id == session_id)
         async with self.database.session() as session:
             trace = await session.scalar(
                 select(AgentTrace)
                 .join(ChatSession, ChatSession.id == AgentTrace.session_id)
-                .where(AgentTrace.id == trace_id, ChatSession.user_id == user_id)
+                .where(*filters)
             )
             if trace is None:
                 raise TraceNotFoundError(str(trace_id))
@@ -421,9 +470,11 @@ def _session_title(question: str) -> str:
     return normalized if len(normalized) <= 80 else f"{normalized[:79]}…"
 
 
-def _span_model(trace_id: UUID, record: SpanRecord) -> TraceSpan:
+def _span_model(record: SpanRecord) -> TraceSpan:
     return TraceSpan(
-        trace_id=trace_id,
+        id=record.id,
+        trace_id=record.trace_id,
+        parent_span_id=record.parent_span_id,
         sequence_no=record.sequence_no,
         name=record.name,
         span_kind=record.span_kind,
@@ -431,10 +482,12 @@ def _span_model(trace_id: UUID, record: SpanRecord) -> TraceSpan:
         started_at=record.started_at,
         ended_at=record.ended_at,
         duration_ms=record.duration_ms,
+        retry_count=record.retry_count,
         input_data=record.input_data,
         output_data=record.output_data,
         error_code=record.error_code,
         error_message=record.error_message,
+        error_data=record.error_data,
         model_provider=record.model_provider,
         model_name=record.model_name,
         model_parameters=record.model_parameters,
@@ -451,3 +504,33 @@ def _span_model(trace_id: UUID, record: SpanRecord) -> TraceSpan:
         artifact_refs=record.artifact_refs,
         attributes=record.attributes,
     )
+
+
+def _apply_span_record(span: TraceSpan, record: SpanRecord) -> None:
+    """把内存中的节点快照完整写回数据库模型。"""
+
+    span.status = record.status
+    span.started_at = record.started_at
+    span.ended_at = record.ended_at
+    span.duration_ms = record.duration_ms
+    span.retry_count = record.retry_count
+    span.input_data = record.input_data
+    span.output_data = record.output_data
+    span.error_code = record.error_code
+    span.error_message = record.error_message
+    span.error_data = record.error_data
+    span.model_provider = record.model_provider
+    span.model_name = record.model_name
+    span.model_parameters = record.model_parameters
+    span.input_tokens = record.input_tokens
+    span.output_tokens = record.output_tokens
+    span.total_tokens = record.total_tokens
+    span.context_length = record.context_length
+    span.tool_name = record.tool_name
+    span.filters = record.filters
+    span.marker = record.marker
+    span.sample_count = record.sample_count
+    span.sample_ids = record.sample_ids
+    span.data_sources = record.data_sources
+    span.artifact_refs = record.artifact_refs
+    span.attributes = record.attributes

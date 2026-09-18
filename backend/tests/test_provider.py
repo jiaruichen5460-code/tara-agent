@@ -158,6 +158,8 @@ async def test_answer_streams_reasoning_and_content_as_separate_deltas() -> None
     assert completions.request["stream_options"] == {"include_usage": True}
     assert completions.request["reasoning_effort"] == "low"
     user_content = json.loads(completions.request["messages"][1]["content"])
+    assert user_content["question"] == "找一个样本"
+    assert user_content["tool_name"] == "find_samples"
     assert "items" not in user_content["tool_result"]
     assert user_content["tool_result"]["page"] == {"total": 50}
     assert "truncated_items" not in completions.request["messages"][1]["content"]

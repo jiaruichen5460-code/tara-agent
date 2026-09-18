@@ -20,6 +20,7 @@ from tara_agent.api.schemas import (
     TraceSpanResponse,
     TraceSummary,
 )
+from tara_agent.persistence.models import AgentTrace, TraceSpan
 from tara_agent.persistence.repositories import (
     AgentRunRepository,
     SessionNotFoundError,
@@ -45,6 +46,19 @@ def _trace_summary(record: object) -> TraceSummary:
     question = input_data.get("question") if isinstance(input_data, dict) else None
     return summary.model_copy(
         update={"question": question if isinstance(question, str) else None}
+    )
+
+
+def _trace_detail(trace: AgentTrace, spans: list[TraceSpan]) -> TraceDetail:
+    summary = _trace_summary(trace)
+    return TraceDetail(
+        **summary.model_dump(),
+        model_parameters=trace.model_parameters,
+        input_data=trace.input_data,
+        output_data=trace.output_data,
+        error_data=trace.error_data,
+        attributes=trace.attributes,
+        spans=[TraceSpanResponse.model_validate(item) for item in spans],
     )
 
 
@@ -172,6 +186,32 @@ async def list_traces(
     )
 
 
+@router.get("/sessions/{session_id}/traces", response_model=TraceListResponse)
+async def list_session_traces(
+    session_id: UUID,
+    request: Request,
+    user: CurrentUserDependency,
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> TraceListResponse:
+    repository = _repository(request)
+    if not await repository.session_exists(session_id, user_id=user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="会话不存在。",
+        )
+    records, total = await repository.list_traces(
+        user_id=user.id,
+        session_id=session_id,
+        limit=limit,
+        offset=offset,
+    )
+    return TraceListResponse(
+        items=[_trace_summary(item) for item in records],
+        page=PageInfo(limit=limit, offset=offset, total=total),
+    )
+
+
 @router.get("/traces/{trace_id}", response_model=TraceDetail)
 async def get_trace(
     trace_id: UUID,
@@ -186,13 +226,28 @@ async def get_trace(
             detail="链路记录不存在。",
         ) from error
 
-    summary = _trace_summary(trace)
-    return TraceDetail(
-        **summary.model_dump(),
-        model_parameters=trace.model_parameters,
-        input_data=trace.input_data,
-        output_data=trace.output_data,
-        error_data=trace.error_data,
-        attributes=trace.attributes,
-        spans=[TraceSpanResponse.model_validate(item) for item in spans],
-    )
+    return _trace_detail(trace, spans)
+
+
+@router.get(
+    "/sessions/{session_id}/traces/{trace_id}",
+    response_model=TraceDetail,
+)
+async def get_session_trace(
+    session_id: UUID,
+    trace_id: UUID,
+    request: Request,
+    user: CurrentUserDependency,
+) -> TraceDetail:
+    try:
+        trace, spans = await _repository(request).get_trace(
+            trace_id,
+            user_id=user.id,
+            session_id=session_id,
+        )
+    except TraceNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="链路记录不存在。",
+        ) from error
+    return _trace_detail(trace, spans)

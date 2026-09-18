@@ -91,7 +91,7 @@ class SessionDetail(SessionSummary):
 class SessionDeleteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    session_ids: list[UUID] = Field(min_length=1, max_length=100)
+    session_ids: list[UUID] = Field(min_length=1)
 
     @field_validator("session_ids")
     @classmethod

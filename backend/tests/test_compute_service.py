@@ -8,7 +8,7 @@ from tara_agent.analysis import (
     DiversityQuery,
     EnvironmentAssociationQuery,
     EnvironmentVariable,
-    TaraScientificService,
+    TaraComputeService,
     TaxonAbundanceQuery,
 )
 from tara_agent.data.catalog import DATASET_SPECS, DatasetKind
@@ -18,9 +18,9 @@ from tara_agent.domain.contracts import Marker
 
 
 @pytest.fixture
-def scientific_service(
+def compute_service(
     preprocessable_dataset_dir: Path, tmp_path: Path
-) -> TaraScientificService:
+) -> TaraComputeService:
     second_asv = (
         "fedcba9876543210fedcba9876543210\tRoot;Eukaryota;Other\t100;99;98"
         "\t1\t1\tACGT\t1\t0\n"
@@ -36,13 +36,13 @@ def scientific_service(
         processed_dir,
         enforce_expected_shape=False,
     )
-    return TaraScientificService(ProcessedDataReader(processed_dir))
+    return TaraComputeService(ProcessedDataReader(processed_dir))
 
 
 def test_taxon_abundance_returns_raw_and_within_sample_relative_values(
-    scientific_service: TaraScientificService,
+    compute_service: TaraComputeService,
 ) -> None:
-    result = scientific_service.taxon_abundance(
+    result = compute_service.taxon_abundance(
         TaxonAbundanceQuery(marker=Marker.V4, taxon="Dinoflagellata")
     )
 
@@ -56,9 +56,9 @@ def test_taxon_abundance_returns_raw_and_within_sample_relative_values(
 
 
 def test_taxon_abundance_keeps_zero_samples_and_warns_for_unknown_taxon(
-    scientific_service: TaraScientificService,
+    compute_service: TaraComputeService,
 ) -> None:
-    result = scientific_service.taxon_abundance(
+    result = compute_service.taxon_abundance(
         TaxonAbundanceQuery(marker=Marker.V9, taxon="NotATaxon")
     )
 
@@ -69,9 +69,9 @@ def test_taxon_abundance_keeps_zero_samples_and_warns_for_unknown_taxon(
 
 
 def test_diversity_returns_observed_richness_and_natural_log_shannon(
-    scientific_service: TaraScientificService,
+    compute_service: TaraComputeService,
 ) -> None:
-    result = scientific_service.diversity_analysis(
+    result = compute_service.diversity_analysis(
         DiversityQuery(marker=Marker.V4, group_by=DiversityGroup.POLAR)
     )
 
@@ -91,9 +91,9 @@ def test_diversity_returns_observed_richness_and_natural_log_shannon(
 
 
 def test_diversity_can_be_limited_to_one_taxon(
-    scientific_service: TaraScientificService,
+    compute_service: TaraComputeService,
 ) -> None:
-    result = scientific_service.diversity_analysis(
+    result = compute_service.diversity_analysis(
         DiversityQuery(marker=Marker.V4, taxon="Dinoflagellata")
     )
 
@@ -103,9 +103,9 @@ def test_diversity_can_be_limited_to_one_taxon(
 
 
 def test_environment_association_requires_three_complete_samples(
-    scientific_service: TaraScientificService,
+    compute_service: TaraComputeService,
 ) -> None:
-    result = scientific_service.environment_association(
+    result = compute_service.environment_association(
         EnvironmentAssociationQuery(
             marker=Marker.V4,
             taxon="Dinoflagellata",
@@ -121,10 +121,10 @@ def test_environment_association_requires_three_complete_samples(
     }
 
 
-def test_scientific_analysis_rejects_unknown_context_sample(
-    scientific_service: TaraScientificService,
+def test_compute_service_rejects_unknown_context_sample(
+    compute_service: TaraComputeService,
 ) -> None:
     with pytest.raises(ValueError, match="Unknown sample IDs"):
-        scientific_service.diversity_analysis(
+        compute_service.diversity_analysis(
             DiversityQuery(marker=Marker.V4, sample_ids=["TARA_UNKNOWN"])
         )

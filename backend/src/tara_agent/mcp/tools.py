@@ -8,21 +8,21 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from tara_agent.analysis.models import (
-    FindSamplesQuery,
-    FindSamplesResult,
-    FindTaxaQuery,
-    FindTaxaResult,
-    SampleInfoResult,
-)
-from tara_agent.analysis.scientific import TaraScientificService
-from tara_agent.analysis.scientific_models import (
+from tara_agent.analysis.compute import TaraComputeService
+from tara_agent.analysis.compute_models import (
     DiversityQuery,
     DiversityResult,
     EnvironmentAssociationQuery,
     EnvironmentAssociationResult,
     TaxonAbundanceQuery,
     TaxonAbundanceResult,
+)
+from tara_agent.analysis.models import (
+    FindSamplesQuery,
+    FindSamplesResult,
+    FindTaxaQuery,
+    FindTaxaResult,
+    SampleInfoResult,
 )
 from tara_agent.analysis.service import AnalysisNotFoundError, TaraQueryService
 
@@ -33,7 +33,7 @@ def register_tools(
     server: MCPServer,
     *,
     query_service: TaraQueryService,
-    scientific_service: TaraScientificService,
+    compute_service: TaraComputeService,
 ) -> None:
     """注册六个 MVP 工具，不增加业务逻辑。"""
 
@@ -93,7 +93,7 @@ def register_tools(
     ) -> TaxonAbundanceResult:
         """计算一个分类单元的原始测序读数和样本内相对丰度。"""
 
-        return _call(lambda: scientific_service.taxon_abundance(query))
+        return _call(lambda: compute_service.taxon_abundance(query))
 
     @server.tool(title="计算 Tara Alpha 多样性", annotations=READ_ONLY)
     def diversity_analysis(
@@ -107,7 +107,7 @@ def register_tools(
     ) -> DiversityResult:
         """计算未稀释抽样的观测 ASV 丰富度与 Shannon 多样性。"""
 
-        return _call(lambda: scientific_service.diversity_analysis(query))
+        return _call(lambda: compute_service.diversity_analysis(query))
 
     @server.tool(title="分析 Tara 环境关联", annotations=READ_ONLY)
     def environment_association(
@@ -127,7 +127,7 @@ def register_tools(
     ) -> EnvironmentAssociationResult:
         """计算一次基于成对完整观测值的 Spearman 丰度关联。"""
 
-        return _call(lambda: scientific_service.environment_association(query))
+        return _call(lambda: compute_service.environment_association(query))
 
 
 def _call[ResultT](operation: Callable[[], ResultT]) -> ResultT:
