@@ -1,4 +1,4 @@
-"""四份 Tara MVP 数据集的确定性校验与预处理。"""
+"""四份 Tara 数据集的可复现校验与预处理。"""
 
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ EXPECTED_MARKER_ROWS = {"v4": 152_155, "v9": 181_388}
 
 
 class PreprocessingError(RuntimeError):
-    """源数据违反确定性预处理约束时抛出。"""
+    """源数据违反预处理校验约束时抛出。"""
 
 
 @dataclass(frozen=True, slots=True)

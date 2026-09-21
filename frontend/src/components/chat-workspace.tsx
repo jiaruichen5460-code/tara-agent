@@ -124,7 +124,7 @@ export function ChatWorkspace() {
 
     let pendingDelta = "";
     let pendingEvent: "reasoning_delta" | "answer_delta" | null = null;
-    let animationFrame: number | null = null;
+    let flushTimer: number | null = null;
 
     const applyToRun = (event: AgentStreamEvent) => {
       setRuns((current) =>
@@ -133,7 +133,7 @@ export function ChatWorkspace() {
     };
 
     const flushDelta = () => {
-      animationFrame = null;
+      flushTimer = null;
       if (!pendingDelta || !pendingEvent) {
         return;
       }
@@ -156,21 +156,21 @@ export function ChatWorkspace() {
         event.delta
       ) {
         if (pendingEvent !== null && pendingEvent !== event.event) {
-          if (animationFrame !== null) {
-            cancelAnimationFrame(animationFrame);
+          if (flushTimer !== null) {
+            window.clearTimeout(flushTimer);
           }
           flushDelta();
         }
         pendingEvent = event.event;
         pendingDelta += event.delta;
-        if (animationFrame === null) {
-          animationFrame = requestAnimationFrame(flushDelta);
+        if (flushTimer === null) {
+          flushTimer = window.setTimeout(flushDelta, 40);
         }
         return;
       }
 
-      if (animationFrame !== null) {
-        cancelAnimationFrame(animationFrame);
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
       }
       flushDelta();
       applyToRun(event);
@@ -188,8 +188,8 @@ export function ChatWorkspace() {
         )),
       );
     } finally {
-      if (animationFrame !== null) {
-        cancelAnimationFrame(animationFrame);
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
       }
       flushDelta();
       setBusy(false);
@@ -325,7 +325,9 @@ function AnalysisRun({ run }: { run: Run }) {
     <article className="analysis-run">
       <UserMessage question={run.question} createdAt={run.createdAt} />
       <div className="agent-response">
-        <div className="agent-avatar" aria-hidden="true"><Network size={17} /></div>
+        <div className={`agent-avatar${inProgress ? " running" : ""}`} aria-hidden="true">
+          {inProgress ? <Activity className="analysis-running-icon" size={18} /> : <Network size={17} />}
+        </div>
         <div className="agent-message">
           <div className="response-content">
             {!run.historical || run.response ? (
@@ -436,7 +438,7 @@ function ProcessPanel({ steps, response, active }: ProcessPanelProps) {
 
   return (
     <DisclosureSection
-      className="process-panel"
+      className={`process-panel${active ? " active" : ""}`}
       icon={active ? <LoaderCircle className="spin" size={16} /> : <Network size={16} />}
       title="分析过程"
       meta={active ? "正在进行" : `${steps.length} 个步骤`}
@@ -445,7 +447,12 @@ function ProcessPanel({ steps, response, active }: ProcessPanelProps) {
         <ol>
           {steps.map((step) => <li key={step.stage}><strong>{step.title}</strong><span>{step.detail}</span></li>)}
         </ol>
-      ) : <p className="progress-placeholder">正在理解问题…</p>}
+      ) : (
+        <p className="progress-placeholder">
+          正在理解问题
+          <span className="progress-dots" aria-hidden="true"><i /><i /><i /></span>
+        </p>
+      )}
       {response ? (
         <div className="tool-call">
           <span>调用工具</span><code>{response.tool.name}</code>

@@ -43,7 +43,7 @@ def create_app(
     application = FastAPI(
         title=runtime_settings.app_name,
         version=__version__,
-        description="Tara Agent 的确定性海洋科学分析 API。",
+        description="Tara Agent 的海洋科学数据分析 API。",
         lifespan=lifespan,
     )
     application.state.settings = runtime_settings

@@ -123,6 +123,14 @@ async def test_auth_cookie_and_user_data_isolation() -> None:
                 json={"email": "first.user@example.com", "password": "incorrect"},
             )
             assert invalid_login.status_code == 401
+            assert invalid_login.json()["detail"] == "邮箱或密码不正确。"
+
+            unregistered_login = await first_client.post(
+                "/api/v1/auth/login",
+                json={"email": "not-registered@example.com", "password": "incorrect"},
+            )
+            assert unregistered_login.status_code == 401
+            assert unregistered_login.json()["detail"] == "邮箱或密码不正确。"
 
         async with AsyncClient(
             transport=ASGITransport(app=app),

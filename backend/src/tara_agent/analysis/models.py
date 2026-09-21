@@ -1,4 +1,4 @@
-"""用于确定性 Tara 查询且与传输方式无关的数据契约。"""
+"""用于 Tara 数据查询且与传输方式无关的数据契约。"""
 
 from __future__ import annotations
 

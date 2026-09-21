@@ -1,4 +1,4 @@
-"""Tara MVP 查询能力的清晰、确定性实现。"""
+"""Tara 数据查询能力的清晰、可测试实现。"""
 
 from __future__ import annotations
 
@@ -78,10 +78,15 @@ class TaraQueryService:
         if not normalized:
             raise ValueError("sample_id must not be blank")
 
-        frame = (
+        frame_query = (
             self.reader.scan_context()
             .filter(pl.col("sample_id_pangaea") == normalized)
-            .collect()
+        )
+        frame = self.reader.collect(
+            frame_query,
+            name="读取指定样本背景数据",
+            artifacts=["context"],
+            filters={"sample_id": normalized},
         )
         if frame.is_empty():
             raise AnalysisNotFoundError(f"Unknown sample ID: {normalized}")
@@ -101,7 +106,17 @@ class TaraQueryService:
     def find_taxa(self, query: FindTaxaQuery) -> FindTaxaResult:
         predicate = taxonomy_predicate(query.taxon, query.match_mode)
         matching = self.reader.scan_asv_metadata(query.marker).filter(predicate)
-        matching_frame = matching.collect(engine="streaming")
+        matching_frame = self.reader.collect(
+            matching,
+            name="读取匹配的分类单元",
+            artifacts=[f"{query.marker.value}_metadata"],
+            filters={
+                "taxon": query.taxon,
+                "match_mode": query.match_mode.value,
+            },
+            marker=query.marker,
+            streaming=True,
+        )
         matching_frame = matching_frame.sort(
             ["total", "amplicon"], descending=[True, False]
         )
@@ -234,13 +249,19 @@ class TaraQueryService:
 
         for start in range(0, len(samples), ABUNDANCE_COLUMNS_PER_BATCH):
             batch = samples[start : start + ABUNDANCE_COLUMNS_PER_BATCH]
-            totals = (
+            totals_query = (
                 self.reader.scan_abundance(query.marker, batch)
                 .join(matching_ids, on="amplicon", how="inner")
                 .select([pl.col(sample).cast(pl.UInt64).sum() for sample in batch])
-                .collect(engine="streaming")
-                .row(0, named=True)
             )
+            totals = self.reader.collect(
+                totals_query,
+                name="读取分类单元样本读数",
+                artifacts=[f"{query.marker.value}_abundance"],
+                filters={"sample_ids": batch, "taxon": query.taxon},
+                marker=query.marker,
+                streaming=True,
+            ).row(0, named=True)
             occurrence_rows.extend(
                 {"sample_id": sample, "read_count": total}
                 for sample, total in totals.items()

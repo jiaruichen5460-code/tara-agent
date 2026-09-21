@@ -1,13 +1,16 @@
-"""确定性地访问已校验、处理后的 Tara 数据。"""
+"""访问已校验、处理后的 Tara 数据。"""
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
 from tara_agent.data.manifest import ArtifactRecord, DataManifest
 from tara_agent.domain.contracts import Marker
+from tara_agent.observability.contracts import ObservationKind, ObservationUpdate
+from tara_agent.observability.execution import observe
 
 
 class ProcessedDataError(RuntimeError):
@@ -51,18 +54,22 @@ class ProcessedDataReader:
         if sample_ids is not None:
             self._validate_requested_samples(sample_ids, set(self.context_sample_ids()))
             query = query.filter(pl.col("sample_id_pangaea").is_in(sample_ids))
-        return query.collect()
+        return self.collect(
+            query,
+            name="读取样本背景数据",
+            artifacts=["context"],
+            filters={"sample_ids": sample_ids} if sample_ids is not None else None,
+        )
 
     def context_sample_ids(self) -> list[str]:
         """按处理后数据的稳定顺序返回背景样本 ID。"""
 
-        return (
-            self.scan_context()
-            .select("sample_id_pangaea")
-            .collect()
-            .get_column("sample_id_pangaea")
-            .to_list()
+        frame = self.collect(
+            self.scan_context().select("sample_id_pangaea"),
+            name="读取背景样本标识",
+            artifacts=["context"],
         )
+        return frame.get_column("sample_id_pangaea").to_list()
 
     def scan_asv_metadata(self, marker: Marker) -> pl.LazyFrame:
         """返回指定标记的 ASV 分类信息和元数据。"""
@@ -93,19 +100,75 @@ class ProcessedDataReader:
         sample_ids: list[str] | None = None,
         taxonomy_contains: str | None = None,
     ) -> pl.DataFrame:
-        """加载已关联的 ASV 元数据及选取的读数列，供确定性分析使用。"""
+        """加载已关联的 ASV 元数据及选取的读数列，供科学分析使用。"""
 
         metadata = self.scan_asv_metadata(marker)
         if taxonomy_contains is not None:
             metadata = metadata.filter(
                 pl.col("taxonomy").str.contains(taxonomy_contains, literal=True)
             )
-        return metadata.join(
+        query = metadata.join(
             self.scan_abundance(marker, sample_ids),
             on="amplicon",
             how="inner",
             validate="1:1",
-        ).collect(engine="streaming")
+        )
+        return self.collect(
+            query,
+            name="读取标记分类与丰度数据",
+            artifacts=[
+                f"{marker.value}_metadata",
+                f"{marker.value}_abundance",
+            ],
+            filters={
+                "sample_ids": sample_ids,
+                "taxonomy_contains": taxonomy_contains,
+            },
+            marker=marker,
+            streaming=True,
+        )
+
+    def collect(
+        self,
+        query: pl.LazyFrame,
+        *,
+        name: str,
+        artifacts: list[str],
+        filters: dict[str, Any] | None = None,
+        marker: Marker | None = None,
+        streaming: bool = False,
+    ) -> pl.DataFrame:
+        """执行一次惰性查询，并记录实际读取的处理后数据版本和结果规模。"""
+
+        records = [self.manifest.artifacts[item] for item in artifacts]
+        with observe(
+            name,
+            ObservationKind.DATA,
+            ObservationUpdate(
+                input_data={"artifacts": artifacts, "filters": filters or {}},
+                filters=filters,
+                marker=marker.value if marker is not None else None,
+                data_sources=[self._trace_source(record) for record in records],
+            ),
+        ) as observation:
+            frame = query.collect(engine="streaming" if streaming else "auto")
+            observation.finish(
+                ObservationUpdate(
+                    output_data={
+                        "row_count": frame.height,
+                        "column_count": frame.width,
+                    }
+                )
+            )
+            return frame
+
+    def _trace_source(self, artifact: ArtifactRecord) -> dict[str, Any]:
+        return {
+            "filename": artifact.relative_path,
+            "generation": self.manifest.generation,
+            "pipeline_version": self.manifest.pipeline_version,
+            "sha256": artifact.sha256,
+        }
 
     def _artifact_path(self, artifact: ArtifactRecord) -> Path:
         return self._safe_child(self.generation_dir, artifact.relative_path)

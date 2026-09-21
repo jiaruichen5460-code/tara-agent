@@ -1,4 +1,4 @@
-"""Tara 确定性计算的数据契约。"""
+"""Tara 科学计算的数据契约。"""
 
 from __future__ import annotations
 

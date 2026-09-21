@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, LoaderCircle, LockKeyhole, UserRound, Waves } from "lucide-react";
+import { AlertTriangle, LoaderCircle, LogIn, UserPlus, UserRound, Waves } from "lucide-react";
 import {
   createContext,
   type FormEvent,
@@ -112,17 +112,22 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: AuthUser) => 
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [loginRejected, setLoginRejected] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError(undefined);
+    setLoginRejected(false);
     try {
       const response = mode === "login"
         ? await login(email, password)
         : await register(email, displayName, password);
       onAuthenticated(response.user);
     } catch (reason) {
+      setLoginRejected(
+        mode === "login" && reason instanceof ApiError && reason.status === 401,
+      );
       setError(reason instanceof Error ? reason.message : "认证请求失败");
     } finally {
       setBusy(false);
@@ -144,7 +149,9 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: AuthUser) => 
 
   function switchMode(nextMode: "login" | "register") {
     setMode(nextMode);
+    setPassword("");
     setError(undefined);
+    setLoginRejected(false);
   }
 
   return (
@@ -179,6 +186,14 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: AuthUser) => 
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
+              onInvalid={(event) => {
+                event.currentTarget.setCustomValidity(
+                  event.currentTarget.validity.valueMissing
+                    ? "请输入邮箱"
+                    : "请输入正确的邮箱地址",
+                );
+              }}
+              onInput={(event) => event.currentTarget.setCustomValidity("")}
               maxLength={320}
               autoComplete="email"
               required
@@ -197,9 +212,21 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: AuthUser) => 
             />
             {mode === "register" ? <small>至少 12 个字符</small> : null}
           </label>
-          {error ? <div className="auth-error"><AlertTriangle size={15} />{error}</div> : null}
+          {error ? (
+            <div className="auth-error">
+              <AlertTriangle size={15} />
+              <div>
+                <span>{error}</span>
+                {loginRejected ? (
+                  <button type="button" onClick={() => switchMode("register")}>
+                    尚未注册？前往注册
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           <button className="auth-submit" type="submit" disabled={busy}>
-            {busy ? <LoaderCircle className="spin" size={17} /> : <LockKeyhole size={17} />}
+            <AuthSubmitIcon busy={busy} mode={mode} />
             {busy ? "正在处理…" : mode === "login" ? "登录" : "创建并登录"}
           </button>
         </form>
@@ -215,4 +242,10 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: AuthUser) => 
       </section>
     </main>
   );
+}
+
+function AuthSubmitIcon({ busy, mode }: { busy: boolean; mode: "login" | "register" }) {
+  if (busy) return <LoaderCircle className="spin" size={17} />;
+  if (mode === "login") return <LogIn size={17} />;
+  return <UserPlus size={17} />;
 }

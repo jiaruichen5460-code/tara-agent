@@ -2,7 +2,10 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from tara_agent.agent.tracing import ObservationUpdate, TraceRecorder
+import pytest
+
+from tara_agent.observability.contracts import ObservationUpdate
+from tara_agent.observability.recorder import TraceRecorder
 from tara_agent.persistence.repositories import SpanRecord
 
 
@@ -73,3 +76,47 @@ async def _exercise_trace_lifecycle() -> None:
 
 def test_trace_recorder_persists_incremental_nested_lifecycle() -> None:
     asyncio.run(_exercise_trace_lifecycle())
+
+
+async def _exercise_trace_safety_contract() -> None:
+    repository = RecordingRepository()
+    recorder = TraceRecorder(repository, uuid4())
+
+    root_id = await recorder.start_observation(" 工作流 ", "workflow")
+    child_id = await recorder.start_observation(
+        "模型调用",
+        "llm",
+        parent_span_id=root_id,
+        details=ObservationUpdate(
+            input_data={"api_key": "private", "question": "test"},
+            attributes={"first": 1},
+        ),
+    )
+    await recorder.update_observation(
+        child_id,
+        ObservationUpdate(
+            attributes={"second": 2},
+            sample_ids=[f"sample-{index}" for index in range(105)],
+        ),
+    )
+
+    child = repository.records[child_id]
+    assert repository.records[root_id].name == "工作流"
+    assert child.input_data == {"api_key": "[REDACTED]", "question": "test"}
+    assert child.attributes == {
+        "first": 1,
+        "second": 2,
+        "sample_ids_omitted": 5,
+    }
+    assert len(child.sample_ids) == 100
+
+    with pytest.raises(ValueError, match="不支持的 Trace 节点类型"):
+        await recorder.start_observation("未知节点", "unknown")
+    with pytest.raises(ValueError, match="Trace 父节点不存在"):
+        await recorder.start_observation("孤立节点", "node", parent_span_id=uuid4())
+    with pytest.raises(ValueError, match="只能有一个根节点"):
+        await recorder.start_observation("第二个根节点", "workflow")
+
+
+def test_trace_recorder_enforces_safe_observation_contract() -> None:
+    asyncio.run(_exercise_trace_safety_contract())

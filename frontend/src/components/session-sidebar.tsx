@@ -15,7 +15,7 @@ import {
   Waves,
   X,
 } from "lucide-react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { deleteSession, deleteSessions, listSessions, updateSession } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -58,6 +58,8 @@ export function SessionSidebar({
   const [updatingSessionId, setUpdatingSessionId] = useState<string>();
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest>();
   const [deleteError, setDeleteError] = useState<string>();
+  const [signOutRequested, setSignOutRequested] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -120,6 +122,29 @@ export function SessionSidebar({
     document.addEventListener("keydown", closeDialogWithEscape);
     return () => document.removeEventListener("keydown", closeDialogWithEscape);
   }, [deleteRequest, deleting]);
+
+  useEffect(() => {
+    if (!signOutRequested) {
+      return;
+    }
+    function closeDialogWithEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !signingOut) {
+        setSignOutRequested(false);
+      }
+    }
+    document.addEventListener("keydown", closeDialogWithEscape);
+    return () => document.removeEventListener("keydown", closeDialogWithEscape);
+  }, [signOutRequested, signingOut]);
+
+  async function confirmSignOut() {
+    setSigningOut(true);
+    try {
+      await signOut();
+      setSignOutRequested(false);
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   function toggleManaging() {
     setManaging((current) => !current);
@@ -464,65 +489,109 @@ export function SessionSidebar({
           <strong>{user.display_name}</strong>
           {!user.is_guest ? <span>{user.email}</span> : null}
         </div>
-        <button type="button" onClick={() => void signOut()} aria-label="退出登录" title="退出登录">
+        <button
+          type="button"
+          onClick={() => setSignOutRequested(true)}
+          aria-label="退出登录"
+          title="退出登录"
+        >
           <LogOut size={15} />
         </button>
       </div>
 
+      {signOutRequested ? (
+        <ConfirmationDialog
+          titleId="sign-out-dialog-title"
+          title="退出登录？"
+          description="退出后将返回登录页面，当前账户中的会话数据不会被删除。"
+          confirmLabel="退出登录"
+          confirmStyle="primary"
+          busy={signingOut}
+          onCancel={() => setSignOutRequested(false)}
+          onConfirm={() => void confirmSignOut()}
+        />
+      ) : null}
+
       {deleteRequest ? (
-        <div
-          className="delete-dialog-layer"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !deleting) {
-              setDeleteRequest(undefined);
-              setDeleteError(undefined);
-            }
+        <ConfirmationDialog
+          titleId="delete-dialog-title"
+          title={deleteRequest.sessionIds.length === 1 ? "删除对话？" : "删除多个对话？"}
+          description={deleteRequest.sessionIds.length === 1 ? (
+            <>这会永久删除 <strong>“{deleteRequest.title}”</strong> 及其全部分析记录。</>
+          ) : (
+            <>这会永久删除选中的 <strong>{deleteRequest.sessionIds.length} 个对话</strong> 及其全部分析记录。</>
+          )}
+          note="删除后无法恢复。"
+          confirmLabel="删除"
+          confirmStyle="danger"
+          busy={deleting}
+          error={deleteError}
+          onCancel={() => {
+            setDeleteRequest(undefined);
+            setDeleteError(undefined);
           }}
-        >
-          <section
-            className="delete-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-dialog-title"
-          >
-            <h2 id="delete-dialog-title">
-              {deleteRequest.sessionIds.length === 1 ? "删除对话？" : "删除多个对话？"}
-            </h2>
-            <p>
-              {deleteRequest.sessionIds.length === 1 ? (
-                <>这会永久删除 <strong>“{deleteRequest.title}”</strong> 及其全部分析记录。</>
-              ) : (
-                <>这会永久删除选中的 <strong>{deleteRequest.sessionIds.length} 个对话</strong> 及其全部分析记录。</>
-              )}
-            </p>
-            <span>删除后无法恢复。</span>
-            {deleteError ? <div className="delete-dialog-error">{deleteError}</div> : null}
-            <footer>
-              <button
-                type="button"
-                onClick={() => {
-                  setDeleteRequest(undefined);
-                  setDeleteError(undefined);
-                }}
-                disabled={deleting}
-                autoFocus
-              >
-                取消
-              </button>
-              <button
-                className="danger"
-                type="button"
-                onClick={() => void confirmDeletion()}
-                disabled={deleting}
-              >
-                {deleting ? <LoaderCircle className="spin" size={15} /> : null}
-                删除
-              </button>
-            </footer>
-          </section>
-        </div>
+          onConfirm={() => void confirmDeletion()}
+        />
       ) : null}
     </aside>
+  );
+}
+
+type ConfirmationDialogProps = {
+  titleId: string;
+  title: string;
+  description: ReactNode;
+  note?: string;
+  confirmLabel: string;
+  confirmStyle: "primary" | "danger";
+  busy: boolean;
+  error?: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+};
+
+function ConfirmationDialog({
+  titleId,
+  title,
+  description,
+  note,
+  confirmLabel,
+  confirmStyle,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+}: ConfirmationDialogProps) {
+  return (
+    <div
+      className="confirmation-dialog-layer"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) {
+          onCancel();
+        }
+      }}
+    >
+      <section
+        className="confirmation-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
+        <h2 id={titleId}>{title}</h2>
+        <p>{description}</p>
+        {note ? <span>{note}</span> : null}
+        {error ? <div className="confirmation-dialog-error">{error}</div> : null}
+        <footer>
+          <button type="button" onClick={onCancel} disabled={busy} autoFocus>
+            取消
+          </button>
+          <button className={confirmStyle} type="button" onClick={onConfirm} disabled={busy}>
+            {busy ? <LoaderCircle className="spin" size={15} /> : null}
+            {confirmLabel}
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 

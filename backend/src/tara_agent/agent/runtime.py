@@ -8,18 +8,13 @@ from typing import Any
 from uuid import UUID
 
 from tara_agent import __version__
-from tara_agent.agent.context import build_answer_model_input
 from tara_agent.agent.graph import TaraAgent
 from tara_agent.agent.models import AgentResponse, AgentStreamEvent
-from tara_agent.agent.tracing import ObservationUpdate, TraceRecorder
-from tara_agent.data.catalog import source_filename
+from tara_agent.agent.workflow import WorkflowTaskEvent
+from tara_agent.observability.contracts import ObservationKind, ObservationUpdate
+from tara_agent.observability.execution import TraceObservationEvent
+from tara_agent.observability.recorder import TraceRecorder
 from tara_agent.persistence.repositories import AgentRunRepository, StartedRun
-
-STAGE_DETAILS: dict[str, tuple[str, str]] = {
-    "understand": ("理解问题并选择工具", "llm"),
-    "execute": ("执行确定性分析", "tool"),
-    "answer": ("组织可追踪答案", "llm"),
-}
 
 
 class PersistentAgentRunner:
@@ -38,7 +33,7 @@ class PersistentAgentRunner:
             user_id=user_id,
             question=question,
             session_id=session_id,
-            workflow_name="tara_agent_chat",
+            workflow_name=self.agent.workflow_name,
             workflow_version=__version__,
             model_provider=model_provider,
             model_name=self.agent.model.name,
@@ -49,8 +44,6 @@ class PersistentAgentRunner:
             repository=self.repository,
             run=run,
             question=question,
-            model_provider=model_provider,
-            model_parameters=model_parameters,
         )
 
     async def run(
@@ -76,42 +69,25 @@ class PersistentAgentRun:
         repository: AgentRunRepository,
         run: StartedRun,
         question: str,
-        model_provider: str,
-        model_parameters: dict[str, Any],
     ) -> None:
         self.agent = agent
         self.repository = repository
         self.run_record = run
         self.question = question
-        self.model_provider = model_provider
-        self.model_parameters = model_parameters
 
     async def stream(self) -> AsyncIterator[AgentStreamEvent]:
         recorder = TraceRecorder(self.repository, self.run_record.trace_id)
         root_id = await recorder.start_observation(
-            "Tara Agent 工作流",
-            "workflow",
+            self.agent.workflow_title,
+            ObservationKind.WORKFLOW,
             started_at=self.run_record.started_at,
             details=ObservationUpdate(
                 input_data={"question": self.question},
-                attributes={"workflow_name": "tara_agent_chat"},
+                attributes={"workflow_name": self.agent.workflow_name},
             ),
         )
-        stage_ids: dict[str, UUID] = {}
-        stage_ids["understand"] = await recorder.start_observation(
-            *STAGE_DETAILS["understand"],
-            parent_span_id=root_id,
-            started_at=self.run_record.started_at,
-            details=ObservationUpdate(
-                input_data={"question": self.question},
-                model_provider=self.model_provider,
-                model_name=self.agent.model.name,
-                model_parameters=self.model_parameters.get("planner", {}),
-            ),
-        )
-        current_stage: str | None = "understand"
-        terminal_received = False
-
+        task_span_ids: dict[str, UUID] = {}
+        operation_span_ids: dict[str, UUID] = {}
         yield AgentStreamEvent(
             event="run_started",
             session_id=self.run_record.session_id,
@@ -119,56 +95,30 @@ class PersistentAgentRun:
         )
 
         try:
-            async for event in self.agent.stream(self.question):
+            async for event in self.agent.stream_execution(self.question):
                 now = datetime.now(UTC)
-                if event.event == "step" and event.step is not None:
-                    stage = event.step.stage
-                    summary = ObservationUpdate(
-                        output_data={"summary": event.step.detail}
+                if isinstance(event, WorkflowTaskEvent):
+                    await self._record_workflow_task(
+                        recorder,
+                        root_id,
+                        task_span_ids,
+                        event,
+                        now,
                     )
-                    if stage == "understand":
-                        await recorder.finish_observation(
-                            stage_ids["understand"],
-                            ended_at=now,
-                            details=summary,
-                        )
-                        stage_ids["execute"] = await recorder.start_observation(
-                            *STAGE_DETAILS["execute"],
-                            parent_span_id=root_id,
-                            started_at=now,
-                        )
-                        current_stage = "execute"
-                    elif stage == "execute":
-                        await recorder.finish_observation(
-                            stage_ids["execute"],
-                            ended_at=now,
-                            details=summary,
-                        )
-                        current_stage = None
-                    elif stage == "answer":
-                        stage_ids["answer"] = await recorder.start_observation(
-                            *STAGE_DETAILS["answer"],
-                            parent_span_id=root_id,
-                            started_at=now,
-                            details=ObservationUpdate(
-                                input_data={"question": self.question},
-                                model_provider=self.model_provider,
-                                model_name=self.agent.model.name,
-                                model_parameters=self.model_parameters.get("answer", {}),
-                            ),
-                        )
-                        current_stage = "answer"
+                    continue
+                if isinstance(event, TraceObservationEvent):
+                    await self._record_operation(
+                        recorder,
+                        task_span_ids,
+                        operation_span_ids,
+                        event,
+                    )
+                    continue
 
                 if event.event != "complete" or event.response is None:
                     yield event
                     continue
 
-                terminal_received = True
-                if current_stage is not None:
-                    await recorder.finish_observation(
-                        stage_ids[current_stage],
-                        ended_at=now,
-                    )
                 response = event.response.model_copy(
                     update={
                         "session_id": self.run_record.session_id,
@@ -176,7 +126,6 @@ class PersistentAgentRun:
                         "message_id": self.run_record.assistant_message_id,
                     }
                 )
-                await self._enrich_observations(recorder, stage_ids, response)
                 await recorder.finish_observation(
                     root_id,
                     ended_at=now,
@@ -191,8 +140,7 @@ class PersistentAgentRun:
                 yield event.model_copy(update={"response": response})
                 return
 
-            if not terminal_received:
-                raise RuntimeError("Agent 流在完整响应前结束")
+            raise RuntimeError("Agent 在返回完整响应前结束")
         except BaseException as error:
             ended_at = datetime.now(UTC)
             error_code = type(error).__name__
@@ -211,6 +159,101 @@ class PersistentAgentRun:
             )
             raise
 
+    async def _record_workflow_task(
+        self,
+        recorder: TraceRecorder,
+        root_id: UUID,
+        task_span_ids: dict[str, UUID],
+        event: WorkflowTaskEvent,
+        occurred_at: datetime,
+    ) -> None:
+        if event.phase == "started":
+            if event.task_id in task_span_ids:
+                raise RuntimeError(f"LangGraph 任务重复开始: {event.task_id}")
+            task_span_ids[event.task_id] = await recorder.start_observation(
+                event.node_title,
+                ObservationKind.NODE,
+                parent_span_id=root_id,
+                started_at=occurred_at,
+                details=ObservationUpdate(
+                    input_data=_trace_mapping(event.input_data),
+                    attributes={
+                        "langgraph_task_id": event.task_id,
+                        "langgraph_node": event.node_name,
+                        "langgraph_namespace": list(event.namespace),
+                    },
+                ),
+            )
+            return
+
+        try:
+            span_id = task_span_ids.pop(event.task_id)
+        except KeyError as error:
+            raise RuntimeError(f"LangGraph 任务缺少开始事件: {event.task_id}") from error
+
+        if event.phase == "completed":
+            await recorder.finish_observation(
+                span_id,
+                ended_at=occurred_at,
+                details=ObservationUpdate(
+                    output_data=_trace_mapping(event.output_data),
+                ),
+            )
+            return
+
+        await recorder.fail_observation(
+            span_id,
+            ended_at=occurred_at,
+            error_code="WorkflowNodeError",
+            error_message=event.error or "LangGraph 节点执行失败",
+        )
+
+    async def _record_operation(
+        self,
+        recorder: TraceRecorder,
+        task_span_ids: dict[str, UUID],
+        operation_span_ids: dict[str, UUID],
+        event: TraceObservationEvent,
+    ) -> None:
+        if event.phase == "started":
+            parent_span_id = operation_span_ids.get(event.parent_id)
+            if parent_span_id is None:
+                parent_span_id = task_span_ids.get(event.parent_id)
+            if parent_span_id is None:
+                raise RuntimeError(f"Trace 操作父节点不存在: {event.parent_id}")
+            if event.observation_id in operation_span_ids:
+                raise RuntimeError(f"Trace 操作重复开始: {event.observation_id}")
+            operation_span_ids[event.observation_id] = await recorder.start_observation(
+                event.name,
+                event.span_kind,
+                parent_span_id=parent_span_id,
+                started_at=event.occurred_at,
+                details=_observation_update(event.details),
+            )
+            return
+
+        try:
+            span_id = operation_span_ids.pop(event.observation_id)
+        except KeyError as error:
+            raise RuntimeError(
+                f"Trace 操作缺少开始事件: {event.observation_id}"
+            ) from error
+
+        if event.phase == "completed":
+            await recorder.finish_observation(
+                span_id,
+                ended_at=event.occurred_at,
+                details=_observation_update(event.details),
+            )
+            return
+
+        await recorder.fail_observation(
+            span_id,
+            ended_at=event.occurred_at,
+            error_code=event.error_code or "OperationError",
+            error_message=event.error_message or "执行失败",
+        )
+
     async def _complete(
         self,
         response: AgentResponse,
@@ -221,7 +264,7 @@ class PersistentAgentRun:
         markers = [str(marker)] if marker else []
         sample_count = _nonnegative_int(provenance.get("sample_count"))
         data_sources = [{"filename": item} for item in response.sources]
-        response_data = response.model_dump(mode="json", exclude={"result"})
+        response_data = response.model_dump(mode="json")
 
         await self.repository.complete_run(
             self.run_record,
@@ -233,87 +276,6 @@ class PersistentAgentRun:
             markers=markers,
             sample_count=sample_count,
             data_sources=data_sources,
-        )
-
-    async def _enrich_observations(
-        self,
-        recorder: TraceRecorder,
-        stage_ids: dict[str, UUID],
-        response: AgentResponse,
-    ) -> None:
-        usage = response.tool.usage
-        await recorder.update_observation(
-            stage_ids["understand"],
-            ObservationUpdate(
-                output_data={
-                    "tool_name": response.tool.name.value,
-                    "arguments": response.tool.arguments,
-                    "rationale": response.tool.summary,
-                },
-                model_provider=self.model_provider,
-                model_name=response.model,
-                model_parameters=self.model_parameters.get("planner", {}),
-                input_tokens=usage.input_tokens if usage else None,
-                output_tokens=usage.output_tokens if usage else None,
-                total_tokens=usage.total_tokens if usage else None,
-                context_length=usage.input_tokens if usage else None,
-                attributes=_usage_attributes(usage),
-            ),
-        )
-
-        provenance = _provenance(response.result)
-        marker = provenance.get("marker") or _marker_from_arguments(
-            response.tool.arguments
-        )
-        sample_ids = _sample_ids(response.result)
-        sample_count = _nonnegative_int(provenance.get("sample_count"))
-        attributes = {}
-        if sample_count is not None and sample_count > len(sample_ids):
-            attributes["sample_ids_scope"] = "returned_result"
-        await recorder.update_observation(
-            stage_ids["execute"],
-            ObservationUpdate(
-                input_data=response.tool.arguments,
-                output_data=response.result,
-                tool_name=response.tool.name.value,
-                filters=dict(provenance.get("filters") or {}),
-                marker=str(marker) if marker else None,
-                sample_count=sample_count,
-                sample_ids=sample_ids,
-                data_sources=[
-                    {"filename": source_filename(str(item))}
-                    for item in provenance.get("source_datasets", [])
-                ],
-                attributes=attributes,
-            ),
-        )
-
-        usage = response.answer_usage
-        await recorder.update_observation(
-            stage_ids["answer"],
-            ObservationUpdate(
-                input_data=build_answer_model_input(
-                    self.question,
-                    response.tool.name,
-                    response.result,
-                ),
-                output_data={
-                    "reasoning": response.reasoning,
-                    "answer": response.answer,
-                    "charts": [
-                        item.model_dump(mode="json") for item in response.charts
-                    ],
-                    "warnings": [
-                        item.model_dump(mode="json") for item in response.warnings
-                    ],
-                    "sources": response.sources,
-                },
-                input_tokens=usage.input_tokens if usage else None,
-                output_tokens=usage.output_tokens if usage else None,
-                total_tokens=usage.total_tokens if usage else None,
-                context_length=usage.input_tokens if usage else None,
-                attributes=_usage_attributes(usage),
-            ),
         )
 
 
@@ -343,34 +305,13 @@ def _nonnegative_int(value: Any) -> int | None:
     return value
 
 
-def _sample_ids(result: dict[str, Any]) -> list[str]:
-    values: list[str] = []
-    sample = result.get("sample")
-    if isinstance(sample, dict):
-        _append_sample_id(values, sample)
-
-    for key in ("items", "sample_occurrences", "observations", "points"):
-        items = result.get(key)
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if isinstance(item, dict):
-                _append_sample_id(values, item)
-    return list(dict.fromkeys(values))
+def _trace_mapping(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    return {"value": value}
 
 
-def _append_sample_id(values: list[str], item: dict[str, Any]) -> None:
-    value = item.get("sample_id") or item.get("sample_id_pangaea")
-    if isinstance(value, str) and value:
-        values.append(value)
-
-
-def _usage_attributes(usage: Any) -> dict[str, int]:
-    if usage is None:
-        return {}
-    attributes = {}
-    if usage.cached_tokens is not None:
-        attributes["cached_tokens"] = usage.cached_tokens
-    if usage.reasoning_tokens is not None:
-        attributes["reasoning_tokens"] = usage.reasoning_tokens
-    return attributes
+def _observation_update(value: dict[str, Any] | None) -> ObservationUpdate | None:
+    return ObservationUpdate(**value) if value is not None else None

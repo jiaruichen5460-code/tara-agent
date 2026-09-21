@@ -1,6 +1,6 @@
 # Tara Agent
 
-Tara Agent 是 Tara Oceans 四份核心数据的分析 MVP：后端提供确定性分析、MCP 工具和 Agent，前端负责对话与结果展示。
+Tara Agent 是面向 Tara Oceans 数据的分析 Agent：后端提供可验证的科学分析、MCP 工具和 Agent，前端负责对话与结果展示。
 
 ## 启动准备
 

@@ -340,11 +340,14 @@ class AgentRunRepository:
                 for trace_id, output_data in trace_rows
                 if isinstance(output_data, dict)
             }
-            if responses:
+            missing_results = {
+                trace_id for trace_id, response in responses.items() if "result" not in response
+            }
+            if missing_results:
                 tool_rows = await session.execute(
                     select(TraceSpan.trace_id, TraceSpan.output_data)
                     .where(
-                        TraceSpan.trace_id.in_(responses),
+                        TraceSpan.trace_id.in_(missing_results),
                         TraceSpan.span_kind == "tool",
                         TraceSpan.output_data.is_not(None),
                     )

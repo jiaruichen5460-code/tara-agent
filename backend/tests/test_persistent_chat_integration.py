@@ -166,36 +166,63 @@ async def test_chat_persists_session_messages_and_trace_tree(
             assert trace.status_code == 200
             trace_payload = trace.json()
             assert trace_payload["status"] == "completed"
-            assert [item["sequence_no"] for item in trace_payload["spans"]] == [0, 1, 2, 3]
+            assert [item["sequence_no"] for item in trace_payload["spans"]] == list(
+                range(9)
+            )
             assert [item["span_kind"] for item in trace_payload["spans"]] == [
                 "workflow",
+                "node",
                 "llm",
+                "node",
                 "tool",
+                "service",
+                "data",
+                "node",
                 "llm",
             ]
             root_span = trace_payload["spans"][0]
             assert root_span["parent_span_id"] is None
-            assert all(
-                item["parent_span_id"] == root_span["id"]
-                for item in trace_payload["spans"][1:]
+            node_spans = [
+                item for item in trace_payload["spans"] if item["span_kind"] == "node"
+            ]
+            assert all(item["parent_span_id"] == root_span["id"] for item in node_spans)
+            assert [item["attributes"]["langgraph_node"] for item in node_spans] == [
+                "understand",
+                "execute",
+                "answer",
+            ]
+            assert all(item["attributes"]["langgraph_task_id"] for item in node_spans)
+            assert all(item["attributes"]["langgraph_namespace"] == [] for item in node_spans)
+            llm_spans = [
+                item for item in trace_payload["spans"] if item["span_kind"] == "llm"
+            ]
+            assert [item["parent_span_id"] for item in llm_spans] == [
+                node_spans[0]["id"],
+                node_spans[2]["id"],
+            ]
+            assert [item["total_tokens"] for item in llm_spans] == [120, 240]
+            tool_span = next(
+                item for item in trace_payload["spans"] if item["span_kind"] == "tool"
             )
-            assert trace_payload["spans"][2]["tool_name"] == "find_samples"
-            assert trace_payload["spans"][2]["sample_count"] == 2
-            assert trace_payload["spans"][2]["sample_ids"] == ["TARA_TEST_001"]
-            assert trace_payload["spans"][2]["attributes"] == {
-                "sample_ids_scope": "returned_result"
-            }
-            assert trace_payload["spans"][1]["total_tokens"] == 120
-            assert trace_payload["spans"][3]["total_tokens"] == 240
-            assert trace_payload["spans"][3]["context_length"] == 200
-            answer_input = trace_payload["spans"][3]["input_data"]
-            assert answer_input["question"] == "找一个 Tara 样本"
-            assert answer_input["tool_name"] == "find_samples"
-            assert "tool_result" in answer_input
-            assert "items" not in answer_input["tool_result"]
-            assert trace_payload["spans"][3]["attributes"] == {
-                "reasoning_tokens": 10
-            }
+            service_span = next(
+                item
+                for item in trace_payload["spans"]
+                if item["span_kind"] == "service"
+            )
+            data_span = next(
+                item for item in trace_payload["spans"] if item["span_kind"] == "data"
+            )
+            assert tool_span["parent_span_id"] == node_spans[1]["id"]
+            assert service_span["parent_span_id"] == tool_span["id"]
+            assert data_span["parent_span_id"] == service_span["id"]
+            assert tool_span["tool_name"] == "find_samples"
+            assert (
+                tool_span["output_data"]["metadata"]["provenance"]
+                ["sample_count"]
+                == 2
+            )
+            assert data_span["output_data"] == {"row_count": 2, "column_count": 39}
+            assert trace_payload["sample_count"] == 2
     finally:
         if user_id is not None:
             async with database.session() as session:
@@ -255,10 +282,21 @@ async def test_failed_model_call_is_persisted(
                 f"/api/v1/sessions/{session_id}/traces/{trace['id']}"
             )
             spans = detail.json()["spans"]
-            assert len(spans) == 2
-            assert [item["status"] for item in spans] == ["failed", "failed"]
-            assert [item["span_kind"] for item in spans] == ["workflow", "llm"]
+            assert len(spans) == 3
+            assert [item["status"] for item in spans] == [
+                "failed",
+                "failed",
+                "failed",
+            ]
+            assert [item["span_kind"] for item in spans] == [
+                "workflow",
+                "node",
+                "llm",
+            ]
+            assert spans[1]["attributes"]["langgraph_node"] == "understand"
             assert spans[1]["parent_span_id"] == spans[0]["id"]
+            assert spans[2]["parent_span_id"] == spans[1]["id"]
+            assert spans[2]["error_code"] == "AgentModelError"
     finally:
         if user_id is not None:
             async with database.session() as session:

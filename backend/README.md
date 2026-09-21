@@ -114,6 +114,14 @@ Pydantic request and response contracts, so clients receive generated input and 
 plus structured results. Set `TARA_PROCESSED_DATA_DIR` when using a non-default processed-data
 directory.
 
+## Trace data contract
+
+Each user request creates one Trace and one nested observation tree. Observation kinds and statuses are defined in `tara_agent.observability.contracts`; callers write nodes through `TraceRecorder` instead of persisting raw span dictionaries directly. Trace contracts, in-process execution context, and persistence lifecycle code live together in the `tara_agent.observability` package.
+
+The recorder redacts common credentials and limits the depth, item count, and text size of node inputs and outputs before persistence. Truncated data includes an explicit marker. Full product responses remain in the Trace output so chat restoration does not depend on bounded developer diagnostics. `context_length` is reserved for the model context-window capacity and remains null when that value is unknown.
+
+LangGraph `tasks` stream events drive workflow-node spans. Node code uses the official runtime `task_id` as the exact parent for nested model, MCP tool, deterministic service, and processed-data access observations. The persistent runner does not contain a fixed list of node names, so adding a branch, loop, or node changes the recorded execution order without adding matching lifecycle code to the runner. Internal task and observation events are filtered out of the public chat stream.
+
 ## Agent and chat API
 
 Set `DEEPSEEK_API_KEY` in `backend/.env`; the default model is `deepseek-flash` and the default

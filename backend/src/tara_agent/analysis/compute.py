@@ -1,4 +1,4 @@
-"""Tara 数据的确定性丰度、多样性和环境关联计算。"""
+"""Tara 数据的丰度、多样性和环境关联计算。"""
 
 from __future__ import annotations
 
@@ -246,19 +246,33 @@ class TaraComputeService:
     def _calculate_taxon_abundance(
         self, query: TaxonSelection, samples: list[str]
     ) -> _AbundanceCalculation:
-        matching_ids = (
+        matching_query = (
             self.reader.scan_asv_metadata(query.marker)
             .filter(taxonomy_predicate(query.taxon, query.match_mode))
             .select("amplicon")
-            .collect(engine="streaming")
-            .get_column("amplicon")
         )
+        matching_ids = self.reader.collect(
+            matching_query,
+            name="读取匹配的分类单元标识",
+            artifacts=[f"{query.marker.value}_metadata"],
+            filters={
+                "taxon": query.taxon,
+                "match_mode": query.match_mode.value,
+            },
+            marker=query.marker,
+            streaming=True,
+        ).get_column("amplicon")
         observations: list[TaxonAbundanceObservation] = []
         zero_libraries: list[str] = []
 
         for batch in self._sample_batches(samples):
-            abundance = self.reader.scan_abundance(query.marker, batch).collect(
-                engine="streaming"
+            abundance = self.reader.collect(
+                self.reader.scan_abundance(query.marker, batch),
+                name="读取样本丰度矩阵",
+                artifacts=[f"{query.marker.value}_abundance"],
+                filters={"sample_ids": batch},
+                marker=query.marker,
+                streaming=True,
             )
             library_totals = self._column_sums(abundance, batch)
             if matching_ids.is_empty():
@@ -302,13 +316,22 @@ class TaraComputeService:
             ].row_count
             return None, count
 
-        amplicons = (
+        amplicon_query = (
             self.reader.scan_asv_metadata(query.marker)
             .filter(taxonomy_predicate(query.taxon, query.match_mode))
             .select("amplicon")
-            .collect(engine="streaming")
-            .get_column("amplicon")
         )
+        amplicons = self.reader.collect(
+            amplicon_query,
+            name="读取多样性分析分类单元",
+            artifacts=[f"{query.marker.value}_metadata"],
+            filters={
+                "taxon": query.taxon,
+                "match_mode": query.match_mode.value,
+            },
+            marker=query.marker,
+            streaming=True,
+        ).get_column("amplicon")
         return amplicons, len(amplicons)
 
     def _calculate_diversity(
@@ -319,8 +342,13 @@ class TaraComputeService:
     ) -> list[DiversityObservation]:
         observations: list[DiversityObservation] = []
         for batch in self._sample_batches(samples):
-            abundance = self.reader.scan_abundance(marker, batch).collect(
-                engine="streaming"
+            abundance = self.reader.collect(
+                self.reader.scan_abundance(marker, batch),
+                name="读取多样性分析丰度矩阵",
+                artifacts=[f"{marker.value}_abundance"],
+                filters={"sample_ids": batch},
+                marker=marker,
+                streaming=True,
             )
             if amplicons is not None:
                 abundance = abundance.filter(

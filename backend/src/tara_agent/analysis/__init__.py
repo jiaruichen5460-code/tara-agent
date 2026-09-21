@@ -1,4 +1,4 @@
-"""确定性的 Tara 查询与计算服务。"""
+"""Tara 数据查询与科学计算服务。"""
 
 from tara_agent.analysis.compute import TaraComputeService
 from tara_agent.analysis.compute_models import (

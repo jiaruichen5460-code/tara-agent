@@ -64,7 +64,7 @@ async def _exercise_database() -> None:
                 TraceSpan(
                     trace_id=trace_id,
                     sequence_no=0,
-                    name="调用确定性工具",
+                    name="调用分析工具",
                     span_kind="tool",
                     status="completed",
                     tool_name="find_samples",

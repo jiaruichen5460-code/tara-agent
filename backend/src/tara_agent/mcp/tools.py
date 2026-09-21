@@ -1,7 +1,7 @@
-"""确定性 Tara 查询与分析服务的轻量 MCP 适配层。"""
+"""Tara 查询与分析服务的轻量 MCP 适配层。"""
 
 from collections.abc import Callable
-from typing import Annotated
+from typing import Annotated, Any
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -25,6 +25,9 @@ from tara_agent.analysis.models import (
     SampleInfoResult,
 )
 from tara_agent.analysis.service import AnalysisNotFoundError, TaraQueryService
+from tara_agent.data.catalog import source_filename
+from tara_agent.observability.contracts import ObservationKind, ObservationUpdate
+from tara_agent.observability.execution import observe
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 
@@ -49,7 +52,11 @@ def register_tools(
     ) -> FindSamplesResult:
         """使用明确且受限的环境条件查询样本背景信息。"""
 
-        return _call(lambda: query_service.find_samples(query))
+        return _call(
+            "TaraQueryService.find_samples",
+            {"query": query.model_dump(mode="json")},
+            lambda: query_service.find_samples(query),
+        )
 
     @server.tool(title="获取 Tara 样本信息", annotations=READ_ONLY)
     def get_sample_info(
@@ -65,7 +72,11 @@ def register_tools(
     ) -> SampleInfoResult:
         """根据准确的 PANGAEA 样本 ID 获取完整且已校验的背景信息。"""
 
-        return _call(lambda: query_service.get_sample_info(sample_id))
+        return _call(
+            "TaraQueryService.get_sample_info",
+            {"sample_id": sample_id},
+            lambda: query_service.get_sample_info(sample_id),
+        )
 
     @server.tool(title="查询 Tara 分类单元", annotations=READ_ONLY)
     def find_taxa(
@@ -79,7 +90,11 @@ def register_tools(
     ) -> FindTaxaResult:
         """在指定标记中查询匹配的 ASV 及其样本出现情况。"""
 
-        return _call(lambda: query_service.find_taxa(query))
+        return _call(
+            "TaraQueryService.find_taxa",
+            {"query": query.model_dump(mode="json")},
+            lambda: query_service.find_taxa(query),
+        )
 
     @server.tool(title="计算分类单元丰度", annotations=READ_ONLY)
     def taxon_abundance(
@@ -93,7 +108,11 @@ def register_tools(
     ) -> TaxonAbundanceResult:
         """计算一个分类单元的原始测序读数和样本内相对丰度。"""
 
-        return _call(lambda: compute_service.taxon_abundance(query))
+        return _call(
+            "TaraComputeService.taxon_abundance",
+            {"query": query.model_dump(mode="json")},
+            lambda: compute_service.taxon_abundance(query),
+        )
 
     @server.tool(title="计算 Tara Alpha 多样性", annotations=READ_ONLY)
     def diversity_analysis(
@@ -107,7 +126,11 @@ def register_tools(
     ) -> DiversityResult:
         """计算未稀释抽样的观测 ASV 丰富度与 Shannon 多样性。"""
 
-        return _call(lambda: compute_service.diversity_analysis(query))
+        return _call(
+            "TaraComputeService.diversity_analysis",
+            {"query": query.model_dump(mode="json")},
+            lambda: compute_service.diversity_analysis(query),
+        )
 
     @server.tool(title="分析 Tara 环境关联", annotations=READ_ONLY)
     def environment_association(
@@ -127,13 +150,47 @@ def register_tools(
     ) -> EnvironmentAssociationResult:
         """计算一次基于成对完整观测值的 Spearman 丰度关联。"""
 
-        return _call(lambda: compute_service.environment_association(query))
+        return _call(
+            "TaraComputeService.environment_association",
+            {"query": query.model_dump(mode="json")},
+            lambda: compute_service.environment_association(query),
+        )
 
 
-def _call[ResultT](operation: Callable[[], ResultT]) -> ResultT:
+def _call[ResultT](
+    name: str,
+    input_data: dict[str, Any],
+    operation: Callable[[], ResultT],
+) -> ResultT:
     """仅暴露模型可以纠正的错误，其他故障不对外公开。"""
 
     try:
-        return operation()
+        with observe(
+            name,
+            ObservationKind.SERVICE,
+            ObservationUpdate(input_data=input_data),
+        ) as observation:
+            result = operation()
+            observation.finish(_result_details(result))
+            return result
     except (AnalysisNotFoundError, ValueError) as exc:
         raise ToolError(str(exc)) from exc
+
+
+def _result_details(result: Any) -> ObservationUpdate:
+    output = result.model_dump(mode="json")
+    metadata = output.get("metadata", {})
+    provenance = metadata.get("provenance", {})
+    source_datasets = provenance.get("source_datasets", [])
+    marker = provenance.get("marker")
+    sample_count = provenance.get("sample_count")
+    return ObservationUpdate(
+        output_data=output,
+        filters=provenance.get("filters") or None,
+        marker=str(marker) if marker is not None else None,
+        sample_count=sample_count if isinstance(sample_count, int) else None,
+        data_sources=[
+            {"filename": source_filename(str(dataset))}
+            for dataset in source_datasets
+        ],
+    )

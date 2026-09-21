@@ -16,9 +16,11 @@ from tara_agent.agent.models import (
     ToolName,
     ToolPlan,
 )
+from tara_agent.agent.workflow import WorkflowTaskEvent
 from tara_agent.data.preprocess import preprocess
 from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.mcp import create_server
+from tara_agent.observability.execution import TraceObservationEvent
 
 
 class RepresentativeModel(AgentModel):
@@ -186,3 +188,48 @@ async def test_stream_exposes_steps_answer_deltas_then_complete(tara_agent: Tara
     )
     assert streamed_reasoning == events[-1].response.reasoning
     assert streamed_answer == events[-1].response.answer
+
+
+@pytest.mark.anyio
+async def test_execution_stream_exposes_langgraph_task_lifecycle(
+    tara_agent: TaraAgent,
+) -> None:
+    events = [
+        event
+        async for event in tara_agent.stream_execution("找一个 Tara 样本")
+    ]
+    tasks = [event for event in events if isinstance(event, WorkflowTaskEvent)]
+    observations = [
+        event for event in events if isinstance(event, TraceObservationEvent)
+    ]
+
+    assert [(event.node_name, event.phase) for event in tasks] == [
+        ("understand", "started"),
+        ("understand", "completed"),
+        ("execute", "started"),
+        ("execute", "completed"),
+        ("answer", "started"),
+        ("answer", "completed"),
+    ]
+    for started, completed in zip(tasks[::2], tasks[1::2], strict=True):
+        assert started.task_id == completed.task_id
+        assert started.input_data is not None
+        assert completed.output_data is not None
+
+    assert [(event.span_kind, event.phase) for event in observations] == [
+        ("llm", "started"),
+        ("llm", "completed"),
+        ("tool", "started"),
+        ("service", "started"),
+        ("data", "started"),
+        ("data", "completed"),
+        ("service", "completed"),
+        ("tool", "completed"),
+        ("llm", "started"),
+        ("llm", "completed"),
+    ]
+    task_ids = {event.task_id for event in tasks if event.phase == "started"}
+    operation_ids = {event.observation_id for event in observations}
+    assert all(
+        event.parent_id in task_ids | operation_ids for event in observations
+    )
